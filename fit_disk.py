@@ -35,10 +35,10 @@ x = BLAH
 # accel = line of sight acceleration --  Delta[vlsr] / Delta[t_obs]
 
 # Coordinates
-# disk plane -- observer plane (see Rosenfeld (2013), ApJ, 774, 16; Eq 2-3)
-# x = x'
-# y = y'/cos(i)
-# z = 0
+# disk plane ==> observer plane (see Rosenfeld (2013), ApJ, 774, 16; Eq 2-3)
+# x ==> x'
+# y ==> y'/cos(i)
+# z ==> 0
 # theta = arctan(x/y)
 # radius = sqrt(x**2 + y**2)
 # NOTE: x and x' both point along the major axis of the disk, according to the observer
