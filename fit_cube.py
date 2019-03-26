@@ -76,7 +76,9 @@ def parse_fit(result):
             errs[0], errs[1], errs[2] = float(alspl[2]), float(alspl[3]), float(alspl[4])
     return pars, errs
 
-filename = "filename.fits"
+dir = "/Users/rcooke/Work/Research/Accel/data/TW_Hya/2016.1.00440.S/science_goal.uid___A001_X889_X18e/group.uid___A001_X889_X18f/member.uid___A001_X889_X190/product/"
+fname = "TW_Hya_NO-tclean.image.pbcor.copy.fits"
+filename = dir+fname
 xst, yst = 100, 100   # Index of where to start fitting the data
 ist, zst, wst = 1000.0, 2.84/299792.458, 1.0E-3   # Initial guesses for starting point
 
