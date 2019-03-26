@@ -2,17 +2,53 @@ import sys
 import time
 import emcee
 import numpy as np
+import astropy.io.fits as fits
+import astropy.units as u
+import astropy.wcs as WCS
+from scipy.ndimage import rotate as rotate_image
 
-def rebin(a, shape):
-    sh = shape[0],a.shape[0]//shape[0],shape[1],a.shape[1]//shape[1]
-    return a.reshape(sh).mean(-1).mean(1)
 
-data = np.load("Velocity.npy")
+def rebin(arr, shape):
+    sh = shape[0], arr.shape[0]//shape[0], shape[1], arr.shape[1]//shape[1]
+    return arr.reshape(sh).mean(-1).mean(1)
 
-subgrid = 10
-y = data[:,:,0].flatten()
-ye = data[:,:,1].flatten()
-x = BLAH
+
+dir = "/Users/rcooke/Desktop/datatrans/"
+fname = "TW_Hya_contsub_CSv0-tclean.image.pbcor.copy.vmap.fits"
+
+# Load cube
+dfil = fits.open(dir+fname)
+data = dfil[0].data
+dsh = data.shape
+Gcons = 6.67408e-11 * u.m**3 / u.kg / u.s**2
+
+# Formulate the WCS
+w = WCS.WCS(dfil[0].header)
+coord = np.array([[0, 0, 1, 0]]).repeat(dsh[2], axis=0)
+coord[:, 2] = np.arange(coord.shape[0])
+world = w.wcs_pix2world(coord, 1)
+dradec = 3600.0*abs(world[1, 1]-world[0, 1])  # Note, this is in arcseconds
+#dra = u.arcsec * 3600.0*(world[0, 0]-world[1, 0]) * np.cos(world[0, 1]*np.pi/180.0)
+
+subgrid = 11
+y = data[:, :, 0].flatten()
+ye = data[:, :, 1].flatten()
+x = np.zeros(y.shape)
+
+# Setup the subgrids
+xdel, ydel = 0.5, 0.5  # These would be different if using RA and DEC coords
+xone = np.linspace(0.0-xdel*(1.0-1.0/subgrid), data.shape[0][-1]+xdel*(1.0-1.0/subgrid), data.shape[0]*subgrid)#.reshape(10,nsubpix).mean(1)
+yone = np.linspace(0.0-ydel*(1.0-1.0/subgrid), data.shape[1][-1]+ydel*(1.0-1.0/subgrid), data.shape[1]*subgrid)
+xx, yy = np.meshgrid(xone, yone)
+
+# Set the priors
+mn_vlsr, mx_vlsr = -3.5, -2.2
+mn_Mstar, mx_Mstar = 0.6, 1.0
+mn_xcen, mx_xcen = 0.0, data.shape[0]
+mn_ycen, mx_ycen = 0.0, data.shape[1]
+mn_ang_i, mx_ang_i = 0.0, np.pi/2.0
+mn_theta, mx_theta = 0.0, np.pi
+mn_dist, mx_dist = 60.0, 60.2
 
 # Some good reference papers:
 # https://arxiv.org/pdf/1801.03948.pdf
@@ -53,30 +89,43 @@ x = BLAH
 # radius ==> dist * sqrt((xd-xcen)**2 + ((yd-ycen)/cos(ang_i))**2)
 # theta ==> arctan((xd-xcen)*cos(ang_i)/(yd-ycen))
 
-def get_model(theta):
-    model = np.zeros(Ncol)
-    for ii in range(Ncol):
-        model[ii] = model_cden[ii]([[theta[1:]]])
-        if 'Si' in yn[ii]:
-            model[ii] += theta[0]
-    return model
+def get_model(par):
+    vlsr, Mstar, xcen, ycen, ang_i, theta, dist = par
+    dist = dist * u.pc
+    Mstar = Mstar * u.Msun
+    model = vlsr*np.ones((data.shape[0], data.shape[1]))
+    xd = rotate_image(xx, theta*180.0/np.pi)
+    yd = rotate_image(yy, theta*180.0/np.pi)
+    radius = dist * dradec * np.sqrt((xd-xcen)**2 + ((yd-ycen)/np.cos(ang_i))**2)
+    model += np.sqrt(Gcons * Mstar / radius) * np.sin(ang_i) * np.cos(theta)
+    model = model.to(u.km/u.s).value
+    modret = rebin(model, (data.shape[0], data.shape[1]))
+    return modret
 
 
 # Define the probability function as likelihood * prior.
-def lnprior(theta):
-    r, s, m, yy, n, h = theta
-    if mn_met <= m <= mx_met and \
-       mn_yp <= yy <= mx_yp and \
-       mn_hden <= n <= mx_hden and \
-       mn_NHI <= h <= mx_NHI and \
-       mn_sic <= r <= mx_sic and \
-       mn_slp <= s <= mx_slp:
+def lnprior(par):
+    # vlsr  = line of sight velocity
+    # Mstar = central mass
+    # xcen  = x-position of central mass
+    # ycen  = y-position of central mass
+    # ang_i = angle of incidence
+    # theta = angle on the observer's sky where the disk plane intersects the plane of the sky
+    # dist  = Distance from observer to the disk
+    vlsr, Mstar, xcen, ycen, ang_i, theta, dist = par
+    if mn_vlsr <= vlsr <= mx_vlsr and \
+       mn_Mstar <= Mstar <= mx_Mstar and \
+       mn_xcen <= xcen <= mx_xcen and \
+       mn_ycen <= ycen <= mx_ycen and \
+       mn_ang_i <= ang_i <= mx_ang_i and \
+       mn_theta <= theta <= mx_theta and \
+       mn_dist <= dist <= mx_dist:
         return 0.0
     return -np.inf
 
 
-def lnlike(theta, x, y, yerr):
-    model = get_model(theta).flatten()
+def lnlike(par, x, y, yerr):
+    model = get_model(par).flatten()
     inv_sigma2 = 1.0/yerr**2
     return -0.5*(np.sum((y-model)**2*inv_sigma2 - np.log(inv_sigma2)))
 
