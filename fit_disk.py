@@ -1,4 +1,6 @@
+import os
 import sys
+import pdb
 import time
 import emcee
 import numpy as np
@@ -6,15 +8,16 @@ import astropy.io.fits as fits
 import astropy.units as u
 import astropy.wcs as WCS
 from scipy.ndimage import rotate as rotate_image
-
+from matplotlib import pyplot as plt
 
 def rebin(arr, shape):
     sh = shape[0], arr.shape[0]//shape[0], shape[1], arr.shape[1]//shape[1]
     return arr.reshape(sh).mean(-1).mean(1)
 
-
-dir = "/Users/rcooke/Desktop/datatrans/"
-fname = "TW_Hya_contsub_CSv0-tclean.image.pbcor.copy.vmap.fits"
+dir = "/Users/rcooke/Work/Research/Accel/data/TW_Hya/2016.1.00440.S/science_goal.uid___A001_X889_X18e/group.uid___A001_X889_X18f/member.uid___A001_X889_X190/product/"
+#dir = "/Users/rcooke/Desktop/datatrans/"
+#fname = "TW_Hya_contsub_CSv0-tclean.image.pbcor.copy.vmap.fits"
+fname = "test.vmap.fits"
 
 # Load cube
 dfil = fits.open(dir+fname)
@@ -24,10 +27,9 @@ Gcons = 6.67408e-11 * u.m**3 / u.kg / u.s**2
 
 # Formulate the WCS
 w = WCS.WCS(dfil[0].header)
-coord = np.array([[0, 0, 1, 0]]).repeat(dsh[2], axis=0)
-coord[:, 2] = np.arange(coord.shape[0])
+coord = np.array([[0, 0, 1, 0], [1, 1, 1, 0]])
 world = w.wcs_pix2world(coord, 1)
-dradec = 3600.0*abs(world[1, 1]-world[0, 1])  # Note, this is in arcseconds
+dradec = (np.pi/180.0)*abs(world[1, 1]-world[0, 1])  # Note, this is in radians
 #dra = u.arcsec * 3600.0*(world[0, 0]-world[1, 0]) * np.cos(world[0, 1]*np.pi/180.0)
 
 subgrid = 11
@@ -37,8 +39,8 @@ x = np.zeros(y.shape)
 
 # Setup the subgrids
 xdel, ydel = 0.5, 0.5  # These would be different if using RA and DEC coords
-xone = np.linspace(0.0-xdel*(1.0-1.0/subgrid), data.shape[0][-1]+xdel*(1.0-1.0/subgrid), data.shape[0]*subgrid)#.reshape(10,nsubpix).mean(1)
-yone = np.linspace(0.0-ydel*(1.0-1.0/subgrid), data.shape[1][-1]+ydel*(1.0-1.0/subgrid), data.shape[1]*subgrid)
+xone = np.linspace(0.0-xdel*(1.0-1.0/subgrid), data.shape[0]+xdel*(1.0-1.0/subgrid), data.shape[0]*subgrid)#.reshape(10,nsubpix).mean(1)
+yone = np.linspace(0.0-ydel*(1.0-1.0/subgrid), data.shape[1]+ydel*(1.0-1.0/subgrid), data.shape[1]*subgrid)
 xx, yy = np.meshgrid(xone, yone)
 
 # Set the priors
@@ -82,7 +84,7 @@ mn_dist, mx_dist = 60.0, 60.2
 # Equations
 # vobs(x',y') = vlsr + sqrt(G*Mstar/radius) * np.sin(ang_i) * np.cos(theta)
 # Note, need to determine where xd points towards at every interation (i.e. cd must point towards the major axis [theta], which is determined at each iteration)
-# x', y' ==> xd, yd (where xd and yd are now in arcsecs on the sky)
+# x', y' ==> xd, yd (where xd and yd are now in radians on the sky)
 # vlsr ==> vlsr0 + accel*deltaT
 # xcen ==> xcen0 + pm_x
 # ycen ==> ycen0 + pm_y
@@ -94,13 +96,16 @@ def get_model(par):
     dist = dist * u.pc
     Mstar = Mstar * u.Msun
     model = vlsr*np.ones((data.shape[0], data.shape[1]))
-    xd = rotate_image(xx, theta*180.0/np.pi)
-    yd = rotate_image(yy, theta*180.0/np.pi)
+    xd = rotate_image(xx, theta*180.0/np.pi, reshape=False)
+    yd = rotate_image(yy, theta*180.0/np.pi, reshape=False)
+    thetapar = np.arctan2(yd-ycen, xd-xcen)
+    thetapar[np.where((xd-xcen == 0) & (xd == 0))] = 0.0
     radius = dist * dradec * np.sqrt((xd-xcen)**2 + ((yd-ycen)/np.cos(ang_i))**2)
-    model += np.sqrt(Gcons * Mstar / radius) * np.sin(ang_i) * np.cos(theta)
-    model = model.to(u.km/u.s).value
-    modret = rebin(model, (data.shape[0], data.shape[1]))
-    return modret
+    vshift = np.sqrt(Gcons * Mstar / radius) * np.sin(ang_i) * np.cos(thetapar)
+    vshift[np.where(radius == 0.0)] = 0.0
+    vshrb = rebin(vshift, (data.shape[0], data.shape[1]))
+    model += vshrb.to(u.km/u.s).value
+    return model
 
 
 # Define the probability function as likelihood * prior.
@@ -136,52 +141,52 @@ def lnprob(theta, x, y, yerr):
         return -np.inf
     return lp + lnlike(theta, x, y, yerr)
 
+def run_mcmc():
+    # Set up the sampler.
+    ndim, nwalkers = 6, 100
 
-# Find the maximum likelihood value by brute force.
-chi = np.zeros((model_yp.size, Ncol))
-for i in range(Ncol):
-    chi[:, i] = (y[i]-value_cden[i])/ye[i]
-chi2 = chi**2
-chisq = np.sum(chi2, axis=1)
-bst = np.argsort(chisq)
-printbst = 1
-for i in range(printbst):
-    print("""------------------------\n
-        Maximum likelihood result {5:d}/{6:d} {7:.4f}:\n
-        [M/H]  = {0}\n
-        yp     = {1}\n
-        n(H)   = {2}\n
-        N(H I) = {3}\n
-        slope  = {4}\n""".format(model_met[bst[i]], model_yp[bst[i]], model_hden[bst[i]], model_NHI[bst[i]],
-                                 model_slp[bst[i]], i+1, printbst, chisq[bst[i]]))
-modvals = [0.0, model_slp[bst[i]], model_met[bst[i]], model_yp[bst[i]], model_hden[bst[i]], model_NHI[bst[i]]]
+    pos = [np.array([np.random.uniform(mn_vlsr, mx_vlsr),
+                     np.random.uniform(mn_Mstar, mx_Mstar),
+                     np.random.uniform(mn_xcen, mx_xcen),
+                     np.random.uniform(mn_ycen, mx_ycen),
+                     np.random.uniform(mn_ang_i, mx_ang_i),
+                     np.random.uniform(mn_theta, mx_theta),
+                     np.random.uniform(mn_dist, mx_dist)]) for i in range(nwalkers)]
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(x, y, ye), threads=ndim)
 
-# Set up the sampler.
-ndim, nwalkers = 6, 100
-# maxlike = np.array([model_ms[bst], model_ex[bst], model_mx[bst]])
-# minv_ms, maxv_ms = 19.0, 22.0
-# minv_ex, maxv_ex = 1.0, 5.0
-# minv_mx, maxv_mx = 0.0, 0.0001
-# minv_ms, maxv_ms = np.min(model_ms[bst[:printbst]]), np.max(model_ms[bst[:printbst]])
-# minv_ex, maxv_ex = np.min(model_ex[bst[:printbst]]), np.max(model_ex[bst[:printbst]])
-# minv_mx, maxv_mx = np.min(model_mx[bst[:printbst]]), np.max(model_mx[bst[:printbst]])
-pos = [np.array([np.random.uniform(mn_sic, mx_sic),
-                 np.random.uniform(mn_slp, mx_slp),
-                 np.random.uniform(mn_met, mx_met),
-                 np.random.uniform(mn_yp, mx_yp),
-                 np.random.uniform(mn_hden, mx_hden),
-                 np.random.normal(y[0], ye[0])]) for i in range(nwalkers)]
-sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(x, y, ye), threads=ndim)
+    # Clear and run the production chain.
+    print("Running MCMC...")
+    nmbr = 100
+    a = time.time()
+    for i, result in enumerate(sampler.run_mcmc(pos, nmbr, rstate0=np.random.get_state())):
+        if True:  # (i+1) % 100 == 0:
+            print("{0:5.1%}".format(float(i) / nmbr))
+    print("Done.")
+    print((time.time() - a) / 60.0, 'mins')
 
-# Clear and run the production chain.
-print("Running MCMC...")
-nmbr = 15000
-a = time.time()
-for i, result in enumerate(sampler.run_mcmc(pos, nmbr, rstate0=np.random.get_state())):
-    if True:#(i+1) % 100 == 0:
-        print("{0:5.1%}".format(float(i) / nmbr))
-print("Done.")
-print((time.time()-a)/60.0, 'mins')
+    print("Saving samples")
+    np.save("diskfit.npy", sampler.chain)
 
-print("Saving samples")
-np.save("diskfit.npy", sampler.chain)
+
+if __name__ == "__main__":
+    if True:
+        # Do the production run!
+        run_mcmc()
+    elif False:
+        # Run some tests
+        p0 = [-2.75, 0.82, 330.0, 340.0, 5.0*np.pi/180.0, 36.0*np.pi/180.0, 60.1]
+        model = get_model(p0)
+        vmap = np.zeros((model.shape[0], model.shape[1], 2))
+        errs = np.random.uniform(0.01, 0.02, model.shape)
+        vmap[:, :, 0] = np.random.normal(model, errs)
+        vmap[:, :, 1] = errs
+        # Save the fake data
+        fname = "test.fits"
+        outname = dir+fname.split(".fits")[0] + '.vmap.fits'
+        os.remove(outname)
+        header = w.to_header()
+        vmaphdu = fits.PrimaryHDU(vmap, header=header)
+        vmaphdu.writeto(outname)
+        plt.imshow(model)
+        plt.show()
+        print("File saved:\n"+outname)

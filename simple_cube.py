@@ -6,11 +6,12 @@ import astropy.wcs as WCS
 from matplotlib import pyplot as plt
 
 dir = "/Users/rcooke/Work/Research/Accel/data/TW_Hya/2016.1.00440.S/science_goal.uid___A001_X889_X18e/group.uid___A001_X889_X18f/member.uid___A001_X889_X190/product/"
-fname = "TW_Hya_NO-tclean.image.pbcor.copy.fits"
-
-dir = "/Users/rcooke/Desktop/datatrans/"
 fname = "TW_Hya_contsub_CSv0-tclean.image.pbcor.copy.fits"
 freq0 = 342.882857*1.0E9
+
+# dir = "/Users/rcooke/Desktop/datatrans/"
+# fname = "TW_Hya_contsub_CSv0-tclean.image.pbcor.copy.fits"
+# freq0 = 342.882857*1.0E9
 
 plot = dict(rms=True,
             sig=True,
@@ -32,6 +33,7 @@ freq = world[:, 2]
 velo = 299792.458*(freq - freq0)/freq0
 
 # Calculate the median and the rms
+print("calculate rms")
 median = np.median(data, axis=2)
 mad = np.median(np.abs(data-median.reshape(psh)), axis=2)
 rms = 1.4826*mad
@@ -51,9 +53,11 @@ vmap = np.zeros((dsh[0], dsh[1], 2))
 wmap = np.zeros((dsh[0], dsh[1], 2))
 
 # Extract data to be used in the moment maps
+print("extract data to be used for moment maps")
 sigmap[np.isnan(sigmap)] = 0.0  # Remove nans
 idx = np.unravel_index(np.argmax(sigmap), dsh)
-nspat = 50
+idx = (dsh[0]//2, dsh[1]//2, idx[2])
+nspat = 70
 nspec = 60
 idx_min, idx_max = idx[2] - nspec, idx[2] + nspec
 if idx_min <= 0:
@@ -68,9 +72,11 @@ datanrm = datacut/norm.reshape(datacut.shape[0], datacut.shape[1], 1)
 rmsnrm = rms[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat]/norm
 
 # Calculate the moment maps
+print("calculate moment maps")
 dnsh = datanrm.shape
 nsim = 100
-print(dnsh[0]*dnsh[1]*dnsh[2]*nsim)
+print("Number of array elements:", dnsh[0]*dnsh[1]*dnsh[2]*nsim)
+print("(expressed as a log):", np.log10(dnsh[0]*dnsh[1]*dnsh[2]*nsim))
 xcen = np.zeros((dnsh[0], dnsh[1], dnsh[2], nsim))
 xwid = np.ones((dnsh[0], dnsh[1], dnsh[2], nsim))
 sims = np.random.normal(xcen, xwid)
@@ -88,11 +94,26 @@ if plot["velo"]:
     plt.imshow(veloerr, vmin=0.1, vmax=0.5)
     plt.show()
 
+print("regrid and save")
 # Put the results back onto the original grid
 vmap[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat, 0] = velomap
 vmap[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat, 1] = veloerr
 
 # Save the results to a fits file
+outname = dir+fname.split(".fits")[0] + '.vmap.fits'
 header = w.to_header()
 vmaphdu = fits.PrimaryHDU(vmap, header=header)
-vmaphdu.writeto(dir+fname.split(".fits")[0] + '.vmap.fits')
+ans = ''
+if os.path.exists(outname):
+    while ans != 'r' and ans != 'q' and ans != 'o':
+        ans = input("File exists:\n{0:s}\nOverwrite, Rename, or quit (o/r/q):".format(outname))
+        if ans == 'r':
+            while os.path.exists(outname):
+                outfname = input("Suggest a new filename: ")
+                outname = dir + outfname.split(".fits")[0] + '.vmap.fits'
+    if ans == 'o':
+        os.remove(outname)
+else:
+    ans = 'y'
+vmaphdu.writeto(outname)
+print("File saved:\n"+outname)
