@@ -32,7 +32,7 @@ world = w.wcs_pix2world(coord, 1)
 dradec = (np.pi/180.0)*abs(world[1, 1]-world[0, 1])  # Note, this is in radians
 #dra = u.arcsec * 3600.0*(world[0, 0]-world[1, 0]) * np.cos(world[0, 1]*np.pi/180.0)
 
-subgrid = 11
+subgrid = 1
 y = data[:, :, 0].flatten()
 ye = data[:, :, 1].flatten()
 x = np.zeros(y.shape)
@@ -50,7 +50,7 @@ mn_xcen, mx_xcen = 0.0, data.shape[0]
 mn_ycen, mx_ycen = 0.0, data.shape[1]
 mn_ang_i, mx_ang_i = 0.0, np.pi/2.0
 mn_theta, mx_theta = 0.0, np.pi
-mn_dist, mx_dist = 60.0, 60.2
+dist = 60.1 * u.pc
 
 # Some good reference papers:
 # https://arxiv.org/pdf/1801.03948.pdf
@@ -91,16 +91,17 @@ mn_dist, mx_dist = 60.0, 60.2
 # radius ==> dist * sqrt((xd-xcen)**2 + ((yd-ycen)/cos(ang_i))**2)
 # theta ==> arctan((xd-xcen)*cos(ang_i)/(yd-ycen))
 
+
 def get_model(par):
-    vlsr, Mstar, xcen, ycen, ang_i, theta, dist = par
-    dist = dist * u.pc
-    Mstar = Mstar * u.Msun
+    vlsr, Mstar, xcen, ycen, ang_i, theta = par
+    Mstar = Mstar * u.Msun / dist
     model = vlsr*np.ones((data.shape[0], data.shape[1]))
     xd = rotate_image(xx, theta*180.0/np.pi, reshape=False)
     yd = rotate_image(yy, theta*180.0/np.pi, reshape=False)
     thetapar = np.arctan2(yd-ycen, xd-xcen)
     thetapar[np.where((xd-xcen == 0) & (xd == 0))] = 0.0
-    radius = dist * dradec * np.sqrt((xd-xcen)**2 + ((yd-ycen)/np.cos(ang_i))**2)
+    # Note: I have taken out the factor of distance, and included it in Mstar above
+    radius = dradec * np.sqrt((xd-xcen)**2 + ((yd-ycen)/np.cos(ang_i))**2)
     vshift = np.sqrt(Gcons * Mstar / radius) * np.sin(ang_i) * np.cos(thetapar)
     vshift[np.where(radius == 0.0)] = 0.0
     vshrb = rebin(vshift, (data.shape[0], data.shape[1]))
@@ -116,15 +117,13 @@ def lnprior(par):
     # ycen  = y-position of central mass
     # ang_i = angle of incidence
     # theta = angle on the observer's sky where the disk plane intersects the plane of the sky
-    # dist  = Distance from observer to the disk
-    vlsr, Mstar, xcen, ycen, ang_i, theta, dist = par
+    vlsr, Mstar, xcen, ycen, ang_i, theta = par
     if mn_vlsr <= vlsr <= mx_vlsr and \
        mn_Mstar <= Mstar <= mx_Mstar and \
        mn_xcen <= xcen <= mx_xcen and \
        mn_ycen <= ycen <= mx_ycen and \
        mn_ang_i <= ang_i <= mx_ang_i and \
-       mn_theta <= theta <= mx_theta and \
-       mn_dist <= dist <= mx_dist:
+       mn_theta <= theta <= mx_theta:
         return 0.0
     return -np.inf
 
@@ -150,13 +149,12 @@ def run_mcmc():
                      np.random.uniform(mn_xcen, mx_xcen),
                      np.random.uniform(mn_ycen, mx_ycen),
                      np.random.uniform(mn_ang_i, mx_ang_i),
-                     np.random.uniform(mn_theta, mx_theta),
-                     np.random.uniform(mn_dist, mx_dist)]) for i in range(nwalkers)]
+                     np.random.uniform(mn_theta, mx_theta)]) for i in range(nwalkers)]
     sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(x, y, ye), threads=ndim)
 
     # Clear and run the production chain.
     print("Running MCMC...")
-    nmbr = 100
+    nmbr = 10000
     a = time.time()
     for i, result in enumerate(sampler.run_mcmc(pos, nmbr, rstate0=np.random.get_state())):
         if True:  # (i+1) % 100 == 0:
@@ -174,7 +172,7 @@ if __name__ == "__main__":
         run_mcmc()
     elif False:
         # Run some tests
-        p0 = [-2.75, 0.82, 330.0, 340.0, 5.0*np.pi/180.0, 36.0*np.pi/180.0, 60.1]
+        p0 = [-2.75, 0.82, 330.0, 340.0, 5.0*np.pi/180.0, 36.0*np.pi/180.0]
         model = get_model(p0)
         vmap = np.zeros((model.shape[0], model.shape[1], 2))
         errs = np.random.uniform(0.01, 0.02, model.shape)

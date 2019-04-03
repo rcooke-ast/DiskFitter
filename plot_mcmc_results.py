@@ -4,13 +4,12 @@ import matplotlib.pyplot as pl
 from matplotlib.ticker import MaxNLocator
 import plotting_routines as pr
 
-burnin = 1000
-ndim = 7
-onevar = 0
+burnin = 1
+ndim = 6
 chains = np.load('diskfit.npy')
 samples = chains[:, burnin:, :].reshape((-1, ndim))
 
-prenams = ['vLSR', 'Mstar', 'xcen', 'ycen', 'angle_i', 'theta', 'distance']
+prenams = ['vLSR', 'Mstar', 'xcen', 'ycen', 'angle_i', 'theta']
 
 # Plot the timeline
 if True:
@@ -34,7 +33,7 @@ hist_kwargs = dict({})
 hist_kwargs["color"] = contourf_kwargs["colors"][-1]
 #labels = [r"[C/Si]", r"$z_{\rm eff}$", r"[C/H]", r"$y_{\rm P}$", r"$n_{\rm H}~({\rm cm}^{-3})$", r"log~$N$(H\,\textsc{i})/${\rm cm}^{-2}$"]
 labels = [r"{0:s}".format(pp) for pp in prenams]
-fig = corner.corner(samples, bins=[50, 50, 50, 50, 50, 50, 50], levels=levels, plot_datapoints=False, fill_contours=True, smooth=1,
+fig = corner.corner(samples, bins=[50, 50, 50, 50, 50, 50], levels=levels, plot_datapoints=False, fill_contours=True, smooth=1,
                     plot_density=False, contour_kwargs=contour_kwargs, contourf_kwargs=contourf_kwargs, hist_kwargs=hist_kwargs,
                     labels=labels)
 axes = np.array(fig.axes).reshape((ndim, ndim))
@@ -78,12 +77,12 @@ for aa in range(1, ndim):
     for bb in range(aa):
         pr.replot_ticks(axes[aa, bb])
 
-fig.savefig("parameter_estimation_FIXED1Ryd.pdf")
+fig.savefig("plot_mcmc_results.pdf")
 
 #[([tk.set_visible(True) for tk in ax.get_yticklabels()], [tk.set_visible(True) for tk in ax.get_yticklabels()]) for ax in axes.flatten()]
 
 # Compute the quantiles.
-mcmc_pars = map(lambda v: (v[1], v[2]-v[1], v[1]-v[0]), zip(*np.percentile(samples, [16, 50, 84], axis=0)))
+mcmc_par0, mcmc_par1, mcmc_par2, mcmc_par3, mcmc_par4, mcmc_par5 = map(lambda v: (v[1], v[2]-v[1], v[1]-v[0]), zip(*np.percentile(samples, [16, 50, 84], axis=0)))
 
 print("""MCMC result:
     par0 = {0[0]} +{0[1]} -{0[2]})
@@ -92,8 +91,7 @@ print("""MCMC result:
     par3 = {3[0]} +{3[1]} -{3[2]})
     par4 = {4[0]} +{4[1]} -{4[2]})
     par5 = {5[0]} +{5[1]} -{5[2]})
-    par6 = {6[0]} +{6[1]} -{6[2]})
-""".format(mcmc_pars[0], mcmc_pars[1], mcmc_pars[2], mcmc_pars[3], mcmc_pars[4], mcmc_pars[5], mcmc_pars[6]))
+""".format(mcmc_par0, mcmc_par1, mcmc_par2, mcmc_par3, mcmc_par4, mcmc_par5))
 
 prttxt = ["MCMC results:"]
 prttxt += ["{0:s} = {{1:d}[0]} +{{1:d}[1]} -{{1:d}[2]}".format(prenams[jj], jj) for jj in range(ndim)]
