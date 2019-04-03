@@ -53,6 +53,7 @@ mn_xcen, mx_xcen = 0.0, data.shape[0]
 mn_ycen, mx_ycen = 0.0, data.shape[1]
 mn_ang_i, mx_ang_i = 0.0, np.pi/2.0
 mn_theta, mx_theta = 0.0, np.pi
+dist = 60.1 * u.pc
 
 # Some good reference papers:
 # https://arxiv.org/pdf/1801.03948.pdf
@@ -96,13 +97,13 @@ mn_theta, mx_theta = 0.0, np.pi
 
 def get_model(par):
     vlsr, Mstar, xcen, ycen, ang_i, theta = par
-    dist = 60.1 * u.pc
     Mstar = Mstar * u.Msun / dist
     model = vlsr*np.ones((data.shape[0], data.shape[1]))
     xd = rotate_image(xx, theta*180.0/np.pi, reshape=False)
     yd = rotate_image(yy, theta*180.0/np.pi, reshape=False)
     thetapar = np.arctan2(yd-ycen, xd-xcen)
     thetapar[np.where((xd-xcen == 0) & (xd == 0))] = 0.0
+    # Note: I have taken out the factor of distance, and included it in Mstar above
     radius = dradec * np.sqrt((xd-xcen)**2 + ((yd-ycen)/np.cos(ang_i))**2)
     vshift = np.sqrt(Gcons * Mstar / radius) * np.sin(ang_i) * np.cos(thetapar)
     vshift[np.where(radius == 0.0)] = 0.0
@@ -119,7 +120,6 @@ def lnprior(par):
     # ycen  = y-position of central mass
     # ang_i = angle of incidence
     # theta = angle on the observer's sky where the disk plane intersects the plane of the sky
-    # dist  = Distance from observer to the disk
     vlsr, Mstar, xcen, ycen, ang_i, theta = par
     if mn_vlsr <= vlsr <= mx_vlsr and \
        mn_Mstar <= Mstar <= mx_Mstar and \
@@ -244,7 +244,7 @@ if __name__ == "__main__":
         run_chisq()
     elif True:
         # Run some tests
-        p0 = [-2.75, 0.82/60.1, 330.0, 340.0, 5.0*np.pi/180.0, 36.0*np.pi/180.0]
+        p0 = [-2.75, 0.82, 330.0, 340.0, 5.0*np.pi/180.0, 36.0*np.pi/180.0, 60.1]
         model = get_model(p0)
         vmap = np.zeros((model.shape[0], model.shape[1], 2))
         errs = np.random.uniform(0.01, 0.02, model.shape)
