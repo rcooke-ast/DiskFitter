@@ -130,7 +130,7 @@ if idx_min <= 0:
     idx_min = 0
 if idx_max >= dsh[2]:
     idx_max = dsh[2]
-print(idx_min, idx_max)
+
 datacut = fdata[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat, idx_min:idx_max]
 velocut = velo[idx_min:idx_max]
 rmscut = rms[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat]
@@ -150,15 +150,15 @@ del fdata, rms, sigmap
 
 # Setup a radius vector [arcseconds]
 radsamp = 10000
-rad = np.linspace(0., xsize, radsamp)
+rad = np.linspace(0., xsize/1.414, radsamp)
 
 # Generate a surface brightness profile
 radAU, SBprof = np.loadtxt(dir+"TW_Hya_SBprof_Huang2018_COFig4.dat", unpack=True)
 # Convert AU into arcsec
 angl = (radAU*u.AU/dist).to(u.pc/u.pc).value  # in radians
 angl *= 3600.0 * (180.0/np.pi)
-sbfunc = interpolate.interp1d(angl, SBprof, kind='linear')
-sb_profile = sbfunc(rad)
+sbfunc = interpolate.interp1d(angl, SBprof, kind='linear', bounds_error=False, fill_value=0.0)
+sb_profile = sbfunc(rad)/sbfunc(0.0)
 
 # Setup cube parameters #
 print("Set cube parameters")
@@ -171,7 +171,11 @@ obspars['dv'] = dvelo  # km/s/channel
 obspars['beamsize'] = np.array([bmaj, bmin, bpa])  # (arcsec, arcsec, degrees)
 obspars['nsamps'] = 5e5  # Number of cloudlets to use for KinMS models
 obspars['rms'] = rms  # RMS of data
+obspars['sbprof'] = sb_profile  # Surface brightness profile
 
+for key in obspars.keys():
+    print(key, obspars[key])
+pdb.set_trace()
 
 # Make guesses for the parameters, and set prior ranges
 labels = ["intflux", "posang", "inc", 'centx', 'centy', 'voffset', "masscen", "discscale"]  # name of each variable, for plot
