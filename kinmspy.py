@@ -9,6 +9,7 @@ import multiprocessing
 import astropy.wcs as WCS
 import astropy.io.fits as fits
 import astropy.units as u
+from scipy import interpolate
 
 Gcons = 6.67408e-11 * u.m**3 / u.kg / u.s**2
 dist = 59.5 * u.pc
@@ -152,11 +153,12 @@ radsamp = 10000
 rad = np.linspace(0., xsize, radsamp)
 
 # Generate a surface brightness profile
-radAU, SBprof = np.loadtxt(dir+"TW_Hya_SBprof_Huang2018.dat", unpack=True)
+radAU, SBprof = np.loadtxt(dir+"TW_Hya_SBprof_Huang2018_COFig4.dat", unpack=True)
 # Convert AU into arcsec
 angl = (radAU*u.AU/dist).to(u.pc/u.pc).value  # in radians
 angl *= 3600.0 * (180.0/np.pi)
-NOW INTERPOLATE TO GET SBprof as a function of the rad variable
+sbfunc = interpolate.interp1d(angl, SBprof, kind='linear')
+sb_profile = sbfunc(rad)
 
 # Setup cube parameters #
 print("Set cube parameters")
