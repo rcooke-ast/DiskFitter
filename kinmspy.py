@@ -11,7 +11,7 @@ import astropy.io.fits as fits
 import astropy.units as u
 
 Gcons = 6.67408e-11 * u.m**3 / u.kg / u.s**2
-dist = 60.1 * u.pc
+dist = 59.5 * u.pc
 
 
 def make_model(param, obspars, rad):
@@ -90,23 +90,6 @@ dsh = fdata.shape
 psh = (dsh[0], dsh[1], 1,)
 freq0 = 342.882857*1.0E9
 
-# Determine the velocity width of a channel
-print("get velocity and spatial intervals")
-w = WCS.WCS(dfil[0].header)
-coord = np.array([[0, 0, 1, 0]]).repeat(dsh[2], axis=0)
-coord[:, 2] = np.arange(coord.shape[0])
-world = w.wcs_pix2world(coord, 1)
-freq = world[:, 2]
-velo = 299792.458*(freq - freq0)/freq0
-print("TODO :: Could do a better velocity interval")
-vsize = velo[-1]-velo[0]
-dvelo = velo[velo.size//2] - velo[velo.size//2 - 1]
-
-# Determine the spatial size of a cell
-coord = np.array([[0, 0, 1, 0], [1, 1, 1, 0]])
-world = w.wcs_pix2world(coord, 1)
-cellsize = 3600.0*abs(world[1, 1]-world[0, 1])
-
 # Get the beamsize
 print("get beamsize")
 bmaj = dfil[0].header['BMAJ']*3600.0
@@ -119,11 +102,67 @@ median = np.median(fdata, axis=2)
 mad = np.median(np.abs(fdata-median.reshape(psh)), axis=2)
 rms = (1.4826*mad).reshape(psh)
 
+# Determine the velocity width of a channel
+print("get velocity and spatial intervals")
+w = WCS.WCS(dfil[0].header)
+coord = np.array([[0, 0, 1, 0]]).repeat(dsh[2], axis=0)
+coord[:, 2] = np.arange(coord.shape[0])
+world = w.wcs_pix2world(coord, 1)
+freq = world[:, 2]
+velo = 299792.458*(freq - freq0)/freq0
+
+# Determine the spatial size of a cell
+coord = np.array([[0, 0, 1, 0], [1, 1, 1, 0]])
+world = w.wcs_pix2world(coord, 1)
+cellsize = 3600.0*abs(world[1, 1]-world[0, 1])
+
+# Extract just the data around the disk
+print("extract data to be used for fitting")
+sigmap = fdata/rms
+sigmap[np.isnan(sigmap)] = 0.0  # Remove nans
+idx = np.unravel_index(np.argmax(sigmap), dsh)
+idx = (dsh[0]//2, dsh[1]//2, idx[2])
+nspat = 70
+nspec = 60
+idx_min, idx_max = idx[2] - nspec, idx[2] + nspec
+if idx_min <= 0:
+    idx_min = 0
+if idx_max >= dsh[2]:
+    idx_max = dsh[2]
+print(idx_min, idx_max)
+datacut = fdata[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat, idx_min:idx_max]
+velocut = velo[idx_min:idx_max]
+rmscut = rms[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat]
+
+print("TODO :: Could do a better velocity interval")
+vsize = velocut[-1]-velocut[0]
+dvelo = velocut[velocut.size//2] - velocut[velocut.size//2 - 1]
+
+# Set the spatial sizes
+xsize = datacut.shape[0]*cellsize
+ysize = datacut.shape[1]*cellsize
+
+# Save some memory
+print("saving memory")
+dfil.close()
+del fdata, rms, sigmap
+
+# Setup a radius vector [arcseconds]
+radsamp = 10000
+rad = np.linspace(0., xsize, radsamp)
+
+# Generate a surface brightness profile
+radAU, SBprof = np.loadtxt(dir+"TW_Hya_SBprof_Huang2018.dat", unpack=True)
+# Convert AU into arcsec
+angl = (radAU*u.AU/dist).to(u.pc/u.pc).value  # in radians
+angl *= 3600.0 * (180.0/np.pi)
+NOW INTERPOLATE TO GET SBprof as a function of the rad variable
+
 # Setup cube parameters #
 print("Set cube parameters")
 obspars = dict({})
-obspars['xsize'] = fdata.shape[0]*cellsize  # arcseconds
-obspars['ysize'] = fdata.shape[1]*cellsize  # arcseconds
+obspars['xsize'] = xsize  # arcseconds
+obspars['ysize'] = ysize  # arcseconds
 obspars['vsize'] = vsize  # km/s
 obspars['cellsize'] = cellsize  # arcseconds/pixel
 obspars['dv'] = dvelo  # km/s/channel
@@ -131,13 +170,9 @@ obspars['beamsize'] = np.array([bmaj, bmin, bpa])  # (arcsec, arcsec, degrees)
 obspars['nsamps'] = 5e5  # Number of cloudlets to use for KinMS models
 obspars['rms'] = rms  # RMS of data
 
-pdb.set_trace()
-
-# Setup a radius vector
-rad = np.arange(0., 64.)
 
 # Make guesses for the parameters, and set prior ranges
-labels = ["intflux", "posang", "inc", 'centx', 'centy', 'voffset', "vflat", "discscale"]  # name of each variable, for plot
+labels = ["intflux", "posang", "inc", 'centx', 'centy', 'voffset', "masscen", "discscale"]  # name of each variable, for plot
 intflux = 30  # Best fitting total flux
 minintflux = 1.  # lower bound total flux
 maxintflux = 50.  # upper bound total flux
@@ -156,20 +191,17 @@ maxcenty = 5.0  # max cent y
 voffset = 0.0  # Best fit velocity centroid
 minvoffset = -20.0  # min velocity centroid
 maxvoffset = +20.0  # max velocity centroid
-vflat = 175.41546  # vflat
-min_vflat = 10  # Lower range vflat
-max_vflat = 300  # Upper range vflat
-discscale = 10  # Disc exponential scale length
-mindiscscale = 1  # Min Disc exponential scale length
-maxdiscscale = 20.  # Max Disc exponential scale length
+masscen = 0.8  # masscen
+min_masscen = 0.6  # Lower range masscen
+max_masscen = 1.0  # Upper range masscen
 
 # starting best guess #
-param = np.array([intflux, posang, inc, centx, centy, voffset, vflat, discscale])
+param = np.array([intflux, posang, inc, centx, centy, voffset, masscen])
 
 # Setup array for priors - in this code all priors are uniform #
 priorarr = np.zeros((param.size, 2))
-priorarr[:, 0] = [minintflux, minposang, mininc, mincentx, mincenty, minvoffset, min_vflat, mindiscscale]  # Minimum
-priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset, max_vflat, maxdiscscale]  # Maximum
+priorarr[:, 0] = [minintflux, minposang, mininc, mincentx, mincenty, minvoffset, min_masscen]  # Minimum
+priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset, max_masscen]  # Maximum
 
 # Setup MCMC #
 ndim = param.size  # How many parameters to fit
@@ -192,7 +224,7 @@ print("Total runtime expected with", cpus2use, "processors:", (((t1 - t0) / 10.)
 t0 = time.time()
 pos = [param + 1e-4 * np.random.randn(ndim) for i in
        range(nwalkers)]  # walkers start in tight ball around initial guess 
-sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(obspars, rad, fdata, priorarr),
+sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(obspars, rad, datacut, priorarr),
                                 threads=cpus2use)  # Setup the sampler
 
 # Create a new output file, with the next free number #
