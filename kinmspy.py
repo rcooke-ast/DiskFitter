@@ -10,6 +10,7 @@ import astropy.wcs as WCS
 import astropy.io.fits as fits
 import astropy.units as u
 from scipy import interpolate
+from makeplots import makeplots
 
 Gcons = 6.67408e-11 * u.m**3 / u.kg / u.s**2
 dist = 59.5 * u.pc
@@ -17,10 +18,6 @@ dist = 59.5 * u.pc
 
 def make_model(param, obspars, rad):
     # rad is in arcseconds
-
-    sbprof = None
-    print("NEED TO DEFINE FUNCTIONAL FORM OF SURFACE BRIGHTNESS PROFILE")
-    assert(False)
 
     # Convert input rad [in arcsec] to radians
     rpar = rad * (np.pi/180.0) / 3600.0
@@ -31,7 +28,7 @@ def make_model(param, obspars, rad):
 
     # This returns the model
     return KinMS(obspars['xsize'], obspars['ysize'], obspars['vsize'], obspars['cellsize'], obspars['dv'],
-                 obspars['beamsize'], param[2], sbProf=sbprof, sbRad=rad, velRad=rad, velProf=vel,
+                 obspars['beamsize'], param[2], sbProf=obspars['sbprof'], sbRad=rad, velRad=rad, velProf=vel,
                  nSamps=obspars['nsamps'], intFlux=param[0], posAng=param[1], gasSigma=1.,
                  phaseCen=[param[3], param[4]], vOffset=param[5], fixSeed=True)
 
@@ -81,6 +78,7 @@ def lnprob(param, obspars, rad, fdata, priorarr):
 ################# Main code body starts here #########################
 
 # Load in the observational data
+plotinitial = False
 print("Load data -- Is it correct to transpose?")
 #dir = "/Users/rcooke/Work/Research/Accel/data/TW_Hya/2016.1.00440.S/science_goal.uid___A001_X889_X18e/group.uid___A001_X889_X18f/member.uid___A001_X889_X190/product/"
 dir = "/Users/rcooke/Work/Research/Cosmo/SandageTest/ALMA/data/TWHya/"
@@ -98,10 +96,16 @@ bmin = dfil[0].header['BMIN']*3600.0
 bpa = dfil[0].header['BPA']
 
 # Calculate the median and the rms
-print("calculate rms (takes some time...)")
-median = np.median(fdata, axis=2)
-mad = np.median(np.abs(fdata-median.reshape(psh)), axis=2)
-rms = (1.4826*mad).reshape(psh)
+rmsname = dir+fname.replace(".fits", ".rms.npy")
+if os.path.exists(rmsname):
+    print("loading rms...")
+    rms = np.load(rmsname)
+else:
+    print("calculate rms (may take some time)...")
+    median = np.median(fdata, axis=2)
+    mad = np.median(np.abs(fdata-median.reshape(psh)), axis=2)
+    rms = (1.4826*mad).reshape(psh)
+    np.save(rmsname, rms)
 
 # Determine the velocity width of a channel
 print("get velocity and spatial intervals")
@@ -123,21 +127,24 @@ sigmap = fdata/rms
 sigmap[np.isnan(sigmap)] = 0.0  # Remove nans
 idx = np.unravel_index(np.argmax(sigmap), dsh)
 idx = (dsh[0]//2, dsh[1]//2, idx[2])
-nspat = 70
-nspec = 60
+nspat = 50
+nspec = 40
 idx_min, idx_max = idx[2] - nspec, idx[2] + nspec
 if idx_min <= 0:
     idx_min = 0
 if idx_max >= dsh[2]:
     idx_max = dsh[2]
+print("Index of maximum flux:", idx)
+print("Spectrum extracted between indices:", idx_min, idx_max)
 
 datacut = fdata[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat, idx_min:idx_max]
 velocut = velo[idx_min:idx_max]
 rmscut = rms[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat]
+sumflux = np.sum(datacut)
 
 print("TODO :: Could do a better velocity interval")
-vsize = velocut[-1]-velocut[0]
-dvelo = velocut[velocut.size//2] - velocut[velocut.size//2 - 1]
+vsize = abs(velocut[-1]-velocut[0])
+dvelo = abs(velocut[velocut.size//2] - velocut[velocut.size//2 - 1])
 
 # Set the spatial sizes
 xsize = datacut.shape[0]*cellsize
@@ -165,29 +172,30 @@ print("Set cube parameters")
 obspars = dict({})
 obspars['xsize'] = xsize  # arcseconds
 obspars['ysize'] = ysize  # arcseconds
-obspars['vsize'] = vsize  # km/s
+obspars['vsize'] = vsize+dvelo  # km/s
 obspars['cellsize'] = cellsize  # arcseconds/pixel
 obspars['dv'] = dvelo  # km/s/channel
 obspars['beamsize'] = np.array([bmaj, bmin, bpa])  # (arcsec, arcsec, degrees)
 obspars['nsamps'] = 5e5  # Number of cloudlets to use for KinMS models
-obspars['rms'] = rms  # RMS of data
+obspars['rms'] = rmscut  # RMS of data
 obspars['sbprof'] = sb_profile  # Surface brightness profile
 
 for key in obspars.keys():
+    if key in ['rms', 'sbprof']:
+        continue
     print(key, obspars[key])
-pdb.set_trace()
 
 # Make guesses for the parameters, and set prior ranges
 labels = ["intflux", "posang", "inc", 'centx', 'centy', 'voffset', "masscen", "discscale"]  # name of each variable, for plot
-intflux = 30  # Best fitting total flux
-minintflux = 1.  # lower bound total flux
-maxintflux = 50.  # upper bound total flux
-posang = 50.  # Best fit posang.
-minposang = 30.  # Min posang.
-maxposang = 70.  # Max posang.
-inc = 65.  # degrees
-mininc = 50.  # Min inc
-maxinc = 89.  # Max inc
+intflux = sumflux  # Best fitting total flux
+minintflux = intflux/10.0  # lower bound total flux
+maxintflux = intflux*10.0  # upper bound total flux
+posang = 150.  # Best fit posang.
+minposang = 90.  # Min posang.
+maxposang = 180.  # Max posang.
+inc = 5.  # degrees
+mininc = 0.01  # Min inc
+maxinc = 10.0  # Max inc
 centx = 0.0  # Best fit x-pos for kinematic centre
 mincentx = -5.0  # min cent x
 maxcentx = 5.0  # max cent x
@@ -195,8 +203,8 @@ centy = 0.0  # Best fit y-pos for kinematic centre
 mincenty = -5.0  # min cent y
 maxcenty = 5.0  # max cent y
 voffset = 0.0  # Best fit velocity centroid
-minvoffset = -20.0  # min velocity centroid
-maxvoffset = +20.0  # max velocity centroid
+minvoffset = -vsize/2  # min velocity centroid
+maxvoffset = +vsize/2  # max velocity centroid
 masscen = 0.8  # masscen
 min_masscen = 0.6  # Lower range masscen
 max_masscen = 1.0  # Upper range masscen
@@ -218,13 +226,19 @@ nsteps = mcmc_steps / nwalkers  # Each walker must take this many steps to give 
 # How many CPUs to use. Here I am allowing half of the CPUs. Change this if you want more/less.
 cpus2use = multiprocessing.cpu_count() // 2
 
-# Do a test to estimate how long it will take to run the whole code #
+# Do a test to estimate how long it will take to run the whole code
+print("Estimating the expected execution time")
 t0 = time.time()
 for i in range(0, 10): fsim = make_model(param, obspars, rad)
 t1 = time.time()
 print("One model takes", ((t1 - t0) / 10.), "seconds")
-print("Total runtime expected with", cpus2use, "processors:", (((t1 - t0) / 10.) * mcmc_steps) / (
-            0.6 * cpus2use))  # This formula is a rough empirical estimate that works on my system. Your mileage may vary!
+print("Total runtime expected with", cpus2use, "processors:", (((t1 - t0) / 10.) * mcmc_steps) / (0.6 * cpus2use))
+
+### Show what the initial model and data look like
+if plotinitial:
+    makeplots(fsim, obspars['xsize'], obspars['ysize'], obspars['vsize'], obspars['cellsize'], obspars['dv'],
+              obspars['beamsize'], rms=obspars['rms'], posang=param[1])
+    print("[Initial model - close plot to continue]")
 
 # Code to run the MCMC
 t0 = time.time()
