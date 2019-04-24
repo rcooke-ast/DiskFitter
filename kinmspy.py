@@ -186,10 +186,10 @@ for key in obspars.keys():
     print(key, obspars[key])
 
 # Make guesses for the parameters, and set prior ranges
-labels = ["intflux", "posang", "inc", 'centx', 'centy', 'voffset', "masscen", "discscale"]  # name of each variable, for plot
+labels = ["intflux", "posang", "inc", 'centx', 'centy', 'voffset', "masscen"]  # name of each variable, for plot
 intflux = sumflux  # Best fitting total flux
-minintflux = intflux/10.0  # lower bound total flux
-maxintflux = intflux*10.0  # upper bound total flux
+minintflux = intflux/2.0  # lower bound total flux
+maxintflux = intflux*2.0  # upper bound total flux
 posang = 150.  # Best fit posang.
 minposang = 90.  # Min posang.
 maxposang = 180.  # Max posang.
@@ -216,6 +216,9 @@ param = np.array([intflux, posang, inc, centx, centy, voffset, masscen])
 priorarr = np.zeros((param.size, 2))
 priorarr[:, 0] = [minintflux, minposang, mininc, mincentx, mincenty, minvoffset, min_masscen]  # Minimum
 priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset, max_masscen]  # Maximum
+
+print("UP TO HERE - need to decide on walkers and then randomly start the pos variable somewhere between the priors")
+assert(False)
 
 # Setup MCMC #
 ndim = param.size  # How many parameters to fit
@@ -270,3 +273,6 @@ for i, result in enumerate(sampler.sample(pos, iterations=nsteps)):
 sys.stdout.write("\n")
 t1 = time.time()
 print("It took", t1 - t0, "seconds")
+
+print("Saving samples")
+np.save("chains.npy", sampler.chain)
