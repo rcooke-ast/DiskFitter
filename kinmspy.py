@@ -183,6 +183,25 @@ obspars['nsamps'] = 5e5  # Number of cloudlets to use for KinMS models
 obspars['rms'] = rmscut  # RMS of data
 obspars['sbprof'] = sb_profile  # Surface brightness profile
 
+# Write a fits file containing relevant information
+cutname = dir+fname.replace(".fits", ".cut.fits")
+hdr = fits.Header()
+for key in obspars.keys():
+    if key in ['rms', 'sbprof', 'beamsize']:
+        continue
+    hdr[key] = obspars[key]
+hdr['bmaj'] = bmaj
+hdr['bmin'] = bmin
+hdr['bpa'] = bpa
+dathdu = fits.PrimaryHDU(datacut, header=hdr)
+velhdu = fits.ImageHDU(velocut)
+rmshdu = fits.ImageHDU(rmscut)
+radhdu = fits.ImageHDU(rad)
+sbfhdu = fits.ImageHDU(sb_profile)
+hdul = fits.HDUList([dathdu, velhdu, rmshdu, radhdu])
+hdul.writeto(cutname, overwrite=True)
+print("File written:\n{0:s}".format(cutname))
+
 for key in obspars.keys():
     if key in ['rms', 'sbprof']:
         continue
@@ -191,8 +210,8 @@ for key in obspars.keys():
 # Make guesses for the parameters, and set prior ranges
 labels = ["intflux", "posang", "inc", 'centx', 'centy', 'voffset', "masscen"]  # name of each variable, for plot
 intflux = sumflux  # Best fitting total flux
-minintflux = sumflux/3.0  # lower bound total flux
-maxintflux = sumflux*3.0  # upper bound total flux
+minintflux = sumflux/5.0  # lower bound total flux
+maxintflux = sumflux  # upper bound total flux
 posang = 150.  # Best fit posang.
 minposang = 90.  # Min posang.
 maxposang = 180.  # Max posang.
@@ -222,12 +241,12 @@ priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset,
 
 # Setup MCMC #
 ndim = param.size  # How many parameters to fit
-nwalkers = 20  # Minimum of 2 walkers per free parameter
-mcmc_steps = 10000  # How many sample you want to take of the PDF. 3000 is reasonable for a test, larger the better for actual parameter estimation.
+nwalkers = 30  # Minimum of 2 walkers per free parameter
+mcmc_steps = 15000  # How many sample you want to take of the PDF. 3000 is reasonable for a test, larger the better for actual parameter estimation.
 nsteps = mcmc_steps / nwalkers  # Each walker must take this many steps to give a total of mcmc_steps steps
 
 # How many CPUs to use. Here I am allowing half of the CPUs. Change this if you want more/less.
-cpus2use = multiprocessing.cpu_count() // 2
+cpus2use = 6#multiprocessing.cpu_count() // 2
 
 # Do a test to estimate how long it will take to run the whole code
 print("Estimating the expected execution time")

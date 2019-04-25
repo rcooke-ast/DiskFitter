@@ -4,7 +4,8 @@ import matplotlib.pyplot as pl
 from matplotlib.ticker import MaxNLocator
 import plotting_routines as pr
 
-burnin = 80
+preburnin = 60
+burnin = 70
 ndim = 7
 chains = np.load('chains.npy')
 samples = chains[:, burnin:, :].reshape((-1, ndim))
@@ -16,10 +17,10 @@ if True:
     pl.clf()
     fig, axes = pl.subplots(ndim, 1, sharex=True, figsize=(8, 9))
     for i in range(ndim):
-        axes[i].plot(chains[:, :, i].T, color="k", alpha=0.4)
+        axes[i].plot(chains[:, preburnin:, i].T, color="k", alpha=0.4)
         axes[i].yaxis.set_major_locator(MaxNLocator(5))
         #axes[i].axhline(modvals[i], color="#888888", lw=2)
-        axes[i].axvline(burnin, color="r", lw=2)
+        axes[i].axvline(burnin-preburnin, color="r", lw=2)
         axes[i].set_ylabel(prenams[i])
     fig.tight_layout(h_pad=0.0)
     fig.savefig("time_evolution.png")
