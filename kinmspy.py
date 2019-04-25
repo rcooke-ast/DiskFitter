@@ -150,7 +150,8 @@ xsize = datacut.shape[0]*cellsize
 ysize = datacut.shape[1]*cellsize
 
 # Calculate the integrated flux
-sumflux = np.sum(datacut)*dvelo
+psf = makebeam(xsize, ysize, [bmaj/cellsize, bmin/cellsize], rot=bpa)
+sumflux = np.sum(datacut)*dvelo/psf.sum()
 
 # Save some memory
 print("saving memory")
@@ -222,7 +223,7 @@ priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset,
 # Setup MCMC #
 ndim = param.size  # How many parameters to fit
 nwalkers = 20  # Minimum of 2 walkers per free parameter
-mcmc_steps = 2000  # How many sample you want to take of the PDF. 3000 is reasonable for a test, larger the better for actual parameter estimation.
+mcmc_steps = 10000  # How many sample you want to take of the PDF. 3000 is reasonable for a test, larger the better for actual parameter estimation.
 nsteps = mcmc_steps / nwalkers  # Each walker must take this many steps to give a total of mcmc_steps steps
 
 # How many CPUs to use. Here I am allowing half of the CPUs. Change this if you want more/less.
