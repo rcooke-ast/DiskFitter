@@ -4,7 +4,7 @@ import matplotlib.pyplot as pl
 from matplotlib.ticker import MaxNLocator
 import plotting_routines as pr
 
-burnin = 1
+burnin = 120
 ndim = 7
 chains = np.load('chains.npy')
 samples = chains[:, burnin:, :].reshape((-1, ndim))

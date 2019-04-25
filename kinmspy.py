@@ -140,7 +140,6 @@ print("Spectrum extracted between indices:", idx_min, idx_max)
 datacut = fdata[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat, idx_min:idx_max]
 velocut = velo[idx_min:idx_max]
 rmscut = rms[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat]
-sumflux = np.sum(datacut)
 
 print("TODO :: Could do a better velocity interval")
 vsize = abs(velocut[-1]-velocut[0])
@@ -149,6 +148,9 @@ dvelo = abs(velocut[velocut.size//2] - velocut[velocut.size//2 - 1])
 # Set the spatial sizes
 xsize = datacut.shape[0]*cellsize
 ysize = datacut.shape[1]*cellsize
+
+# Calculate the integrated flux
+sumflux = np.sum(datacut)*dvelo
 
 # Save some memory
 print("saving memory")
@@ -188,14 +190,14 @@ for key in obspars.keys():
 # Make guesses for the parameters, and set prior ranges
 labels = ["intflux", "posang", "inc", 'centx', 'centy', 'voffset', "masscen"]  # name of each variable, for plot
 intflux = sumflux  # Best fitting total flux
-minintflux = intflux/2.0  # lower bound total flux
-maxintflux = intflux*2.0  # upper bound total flux
+minintflux = sumflux/3.0  # lower bound total flux
+maxintflux = sumflux*3.0  # upper bound total flux
 posang = 150.  # Best fit posang.
 minposang = 90.  # Min posang.
 maxposang = 180.  # Max posang.
-inc = 5.  # degrees
-mininc = 0.01  # Min inc
-maxinc = 10.0  # Max inc
+inc = 10.  # degrees
+mininc = 5.0  # Min inc
+maxinc = 15.0  # Max inc
 centx = 0.0  # Best fit x-pos for kinematic centre
 mincentx = -5.0  # min cent x
 maxcentx = 5.0  # max cent x
@@ -217,13 +219,10 @@ priorarr = np.zeros((param.size, 2))
 priorarr[:, 0] = [minintflux, minposang, mininc, mincentx, mincenty, minvoffset, min_masscen]  # Minimum
 priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset, max_masscen]  # Maximum
 
-print("UP TO HERE - need to decide on walkers and then randomly start the pos variable somewhere between the priors")
-assert(False)
-
 # Setup MCMC #
 ndim = param.size  # How many parameters to fit
-nwalkers = ndim * 2  # Minimum of 2 walkers per free parameter
-mcmc_steps = 3000  # How many sample you want to take of the PDF. 3000 is reasonable for a test, larger the better for actual parameter estimation.
+nwalkers = 20  # Minimum of 2 walkers per free parameter
+mcmc_steps = 2000  # How many sample you want to take of the PDF. 3000 is reasonable for a test, larger the better for actual parameter estimation.
 nsteps = mcmc_steps / nwalkers  # Each walker must take this many steps to give a total of mcmc_steps steps
 
 # How many CPUs to use. Here I am allowing half of the CPUs. Change this if you want more/less.
@@ -245,8 +244,15 @@ if plotinitial:
 
 # Code to run the MCMC
 t0 = time.time()
-pos = [param + 1e-4 * np.random.randn(ndim) for i in
-       range(nwalkers)]  # walkers start in tight ball around initial guess 
+
+tightball = False
+if tightball:
+    # walkers start in tight ball around initial guess
+    pos = [param + 1e-4 * np.random.randn(ndim) for i in range(nwalkers)]
+else:
+    # walkers sample prior space
+    pos = [np.random.uniform(priorarr[:, 0], priorarr[:, 1]) for i in range(nwalkers)]
+
 sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(obspars, rad, datacut, priorarr),
                                 threads=cpus2use)  # Setup the sampler
 
