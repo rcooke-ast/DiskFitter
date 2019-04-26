@@ -4,7 +4,7 @@ import matplotlib.pyplot as pl
 from matplotlib.ticker import MaxNLocator
 import plotting_routines as pr
 
-preburnin = 60
+preburnin = 50
 burnin = 70
 ndim = 7
 chains = np.load('chains.npy')
@@ -34,7 +34,7 @@ hist_kwargs = dict({})
 hist_kwargs["color"] = contourf_kwargs["colors"][-1]
 #labels = [r"[C/Si]", r"$z_{\rm eff}$", r"[C/H]", r"$y_{\rm P}$", r"$n_{\rm H}~({\rm cm}^{-3})$", r"log~$N$(H\,\textsc{i})/${\rm cm}^{-2}$"]
 labels = [r"{0:s}".format(pp) for pp in prenams]
-fig = corner.corner(samples, bins=[10, 10, 10, 10, 10, 10, 10], levels=levels, plot_datapoints=False, fill_contours=True, smooth=1,
+fig = corner.corner(samples, bins=[50, 50, 50, 50, 50, 50, 50], levels=levels, plot_datapoints=False, fill_contours=True, smooth=1,
                     plot_density=False, contour_kwargs=contour_kwargs, contourf_kwargs=contourf_kwargs, hist_kwargs=hist_kwargs,
                     labels=labels)
 axes = np.array(fig.axes).reshape((ndim, ndim))
