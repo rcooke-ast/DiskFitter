@@ -19,6 +19,7 @@ Gcons = 6.67408e-11 * u.m**3 / u.kg / u.s**2
 dist = 59.5 * u.pc
 
 parscale = 1.0 + 0.0*np.array([10.0, 0.1, 1.0, 1.0E4, 1.0E4, 1.0E4, 1.0, 1.0])
+#parscale = 1.0 + 0.0*np.array([10.0, 0.1, 1.0, 1.0E4, 1.0E4, 1.0E4, 1.0, 1.0, 1.0, 1.0])
 sbscale = 1.0
 
 
@@ -27,11 +28,15 @@ def make_model(param, obspars, rad, sbprof_rad=None):
     """
     if sbprof_rad is None:
         sbProf = obspars['sbprof']
+        # rrc = rad/param[-2]
+        # sbProf = (rrc ** -param[-1]) * np.exp(-(rrc**(2.0 - param[-1])))
+        # sbProf[0] = 0.0
     else:
-        sbfunc = interpolate.interp1d(sbprof_rad, param[-sbprof_rad.size:]/sbscale, kind='linear', bounds_error=False, fill_value=0.0)
+        sbfunc = interpolate.interp1d(sbprof_rad, param[-sbprof_rad.size:]/sbscale, kind='cubic', bounds_error=False, fill_value=0.0)
         sbProf = sbfunc(rad)
         sbProf *= 1.0/np.max(sbProf)
         param[:8] /= parscale
+        sbProf[sbProf < 0.0] = 0.0
 
     # Convert input rad [in arcsec] to radians
     rpar = rad * (np.pi/180.0) / 3600.0
@@ -153,6 +158,14 @@ def prep_data_model(plotinitial=False):
     velocut = velo[idx_min:idx_max]
     rmscut = rms[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat]
 
+    check_rms = False
+    if check_rms:
+        datrms = fdata[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat, 2*idx_max:]
+        val = np.std(datrms, axis=2)
+        print(np.mean(val/rmscut), np.std(val/rmscut))
+        print("Looks good to me!")
+        pdb.set_trace()
+
     print("TODO :: Could do a better velocity interval")
     vsize = abs(velocut[-1]-velocut[0])
     dvelo = abs(velocut[velocut.size//2] - velocut[velocut.size//2 - 1])
@@ -195,6 +208,7 @@ def prep_data_model(plotinitial=False):
     obspars['nsamps'] = 5e5  # Number of cloudlets to use for KinMS models
     obspars['rms'] = rmscut  # RMS of data
     obspars['sbprof'] = sb_profile  # Surface brightness profile
+    obspars['velocut0'] = velocut[0]
 
     # Write a fits file containing relevant information
     cutname = dir+fname.replace(".fits", ".cut.fits")
@@ -247,13 +261,23 @@ def prep_data_model(plotinitial=False):
     min_gassigma = 0.0  # Lower range masscen
     max_gassigma = 2.0  # Upper range masscen
 
+    rc = 1.0  # arcsec
+    min_rc = 0.2  # Lower range masscen
+    max_rc = 2.0  # Upper range masscen
+    gamma = 3.0  # masscen
+    min_gamma = 2.1  # Lower range masscen
+    max_gamma = 5.0  # Upper range masscen
+
     # starting best guess #
     param = np.array([intflux, posang, inc, centx, centy, voffset, masscen, gassigma])
+    #param = np.array([intflux, posang, inc, centx, centy, voffset, masscen, gassigma, rc, gamma])
 
     # Setup array for priors - in this code all priors are uniform #
     priorarr = np.zeros((param.size, 2))
     priorarr[:, 0] = [minintflux, minposang, mininc, mincentx, mincenty, minvoffset, min_masscen, min_gassigma]  # Minimum
     priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset, max_masscen, max_gassigma]  # Maximum
+    # priorarr[:, 0] = [minintflux, minposang, mininc, mincentx, mincenty, minvoffset, min_masscen, min_gassigma, min_rc, min_gamma]  # Minimum
+    # priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset, max_masscen, max_gassigma, max_rc, max_gamma]  # Maximum
 
     # Show what the initial model and data look like
     if plotinitial:
@@ -343,18 +367,20 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
     #          PREPARE THE FIT
     #######################################
     # Include the radial surface brightness profile as a free parameter
-    nsurfb = 7
+    nsurfb = 9
     sbradAU = (np.linspace(0.0, 11.0, nsurfb)**2)*u.AU
+    #sbradAU = np.array([0.0, 8.0, 25.0, 50.0, 80.0, 110.0]) * u.AU
     sbrad = (sbradAU/dist).to(u.pc/u.pc).value  # in radians
     sbrad *= 3600.0 * (180.0/np.pi)
+    sbrad = np.arange(0.0, 2.1, 0.4)
+    sbrad = np.array([0.0, 0.4, 0.8, 1.2, 1.4, 1.6, 1.8, 2.4, 3.0])
     sbfunc = interpolate.interp1d(rad, obspars['sbprof'], kind='linear', bounds_error=False, fill_value=0.0)
     sb_p0 = sbfunc(sbrad)
     sb_p0 *= sbscale/np.max(sb_p0)
     #sb_p0 *= 2.0
     #sb_p0[0] = 1.0
     #sb_p0 = np.array([1.0, 1.0, 1.0, 1.2, 1.4, 1.3, 1.2, 1.0, 0.8, 0.0])
-    sb_p0 = np.array([0.0, 4.0, 2.7, 1.3, 0.8, 0.3, 0.0])/4.0
-
+    sb_p0 = np.array([0.0, 0.4, 1.0, 1.0, 0.6, 0.2, 0.1, 0.05, 0.0])
     debug = False
     if debug:
         sbfunc = interpolate.interp1d(sbrad, sb_p0/sbscale, kind='cubic', bounds_error=False, fill_value=0.0)
@@ -371,13 +397,30 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
     # Set some reasonable starting conditions
     p0 = param * parscale
     p0 = np.append(p0, sb_p0)
+    p0 = np.array([1.13588617e+00,
+    1.51205286e+02,
+    6.03590770e+00,
+    3.55056672e-02,
+    3.32754764e-02,
+    -2.48859106e-01,
+    8.00000000e-01,
+    7.69351341e-02,
+    0.050000000e+00,
+    1.30848314e-01,
+    1.00625823e-01,
+    7.04162504e-02,
+    4.54162504e-02,
+    2.70166892e-02,
+    2.04162504e-02,
+    1.20166892e-02,
+    0.00000000e+00])
     steps = np.array([1.0E-4, 0.1, 0.1, 1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4, 1.0E-4])*parscale
-    stpsb = sb_p0*1.0E-2*np.ones(nsurfb)
-    steps = np.append(steps, stpsb)
+    #stpsb = sb_p0*1.0E-2*np.ones(nsurfb)
+    #steps = np.append(steps, stpsb)
     # param = np.array([intflux, posang, inc, centx, centy, voffset, masscen])
 
     # Set some constraints you would like to impose
-    param_base = {'value': 0., 'fixed': 0, 'limited': [1, 1], 'limits': [0., 0.], 'step': 0.0, 'relstep': 0.1}
+    param_base = {'value': 0., 'fixed': 0, 'limited': [1, 1], 'limits': [0., 0.], 'step': 0.0, 'relstep': 0.001}
 
     # Make a copy of this 'base' for all of our parameters, and set starting parameters
     param_info = []
@@ -387,16 +430,16 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
         if i < len(param):
             param_info[i]['limits'] = [priorarr[i, 0]*parscale[i], priorarr[i, 1]*parscale[i]]
             #param_info[i]['fixed'] = 1
+            param_info[i]['step'] = steps[i]
         else:
             param_info[i]['limits'] = [0.0, sbscale]
-        param_info[i]['step'] = steps[i]
     # Force the inner value of the surface brightness profile to be 1
     #param_info[len(param)]['fixed'] = 1
     #param_info[len(param)]['value'] = 1
     param_info[-1]['fixed'] = 1
     param_info[-1]['value'] = 0
-    param_info[6]['fixed'] = 1
-    param_info[6]['value'] = 0.8
+    #param_info[6]['fixed'] = 1
+    #param_info[6]['value'] = 0.8
 
     # Now tell the fitting program what we called our variables
     err = obspars['rms'].repeat(datacut.shape[2], axis=2)
@@ -420,13 +463,22 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
     dathdu.writeto("test_diff.fits", overwrite=True)
     dathdu = fits.PrimaryHDU(((fsim - datacut) / err).T)
     dathdu.writeto("test_resid.fits", overwrite=True)
-    sbfunc = interpolate.interp1d(sbrad, m.params[-sbrad.size:] / sbscale, kind='linear', bounds_error=False, fill_value=0.0)
+    sbfunc = interpolate.interp1d(sbrad, m.params[-sbrad.size:] / sbscale, kind='cubic', bounds_error=False, fill_value=0.0)
     sbProf = sbfunc(rad)
     sbProf *= 1.0 / np.max(sbProf)
+    sbProf[sbProf < 0.0] = 0.0
     from matplotlib import pyplot as plt
+    plt.subplot(211)
     plt.plot(rad, sbProf, 'k-')
+    # convert rad to radAU
+    plt.subplot(212)
+    radAU = (dist * rad / (3600.0 * (180.0/np.pi))).to(u.AU)
+    plt.plot(radAU.value, sbProf, 'k-')
     plt.show()
     pdb.set_trace()
+    vSize = obspars['vsize']
+    vshft = (vSize / 2.) + m.params[5]
+    vlos = obspars['velocut0'] - vshft
     return
 
 

@@ -73,6 +73,7 @@ param = np.array([intflux[0], posang[0], inc[0], centx[0], centy[0], voffset[0],
 vSize = obspars['vsize']
 voffset = np.percentile(samples[:, 5], [16, 50, 84])
 print(np.mean(voffset))
+print(velcut[0])
 vshft = (vSize / 2.) + voffset
 vlos = velcut[0] - vshft
 vptl = np.percentile(vlos, [16, 50, 84])
