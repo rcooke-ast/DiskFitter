@@ -94,17 +94,37 @@ def lnprob(param, obspars, rad, fdata, priorarr):
     return lnlike(param, obspars, rad, fdata)
 
 
+def load_file(year=2011):
+    if year == 2011:
+        # 12CO(3-2)  --  2011.0.00399.S
+        fname = "TW_Hya_2011.0.00399.S_12CO3-2.fits"
+        freq0 = 345.79598990*1.0E9
+        nspat = 100
+        nspec = 70
+    elif year == 2016:
+        # CSv0  --  2016.1.00440.S
+        fname = "TW_Hya_contsub_CSv0-tclean.image.pbcor.fits"
+        freq0 = 342.882857*1.0E9
+        nspat = 40
+        nspec = 70
+    return fname, freq0, nspat, nspec
+
+
 def prep_data_model(plotinitial=False):
     # Load in the observational data
     print("Load data -- Is it correct to transpose?")
-    #dir = "/Users/rcooke/Work/Research/Accel/data/TW_Hya/2016.1.00440.S/science_goal.uid___A001_X889_X18e/group.uid___A001_X889_X18f/member.uid___A001_X889_X190/product/"
     dir = "/Users/rcooke/Work/Research/Cosmo/SandageTest/ALMA/data/TWHya/"
-    fname = "TW_Hya_contsub_CSv0-tclean.image.pbcor.fits"
+    #fname, freq0, nspat, nspec = load_file(2016)
+    fname, freq0, nspat, nspec = load_file(2011)
+
     dfil = fits.open(dir+fname)
     fdata = dfil[0].data.T[:, :, :, 0]
     dsh = fdata.shape
     psh = (dsh[0], dsh[1], 1,)
-    freq0 = 342.882857*1.0E9
+
+    #dathdu = fits.PrimaryHDU(fdata.sum(2))
+    #dathdu.writeto("intflux.fits", overwrite=True)
+    #pdb.set_trace()
 
     # Get the beamsize
     print("get beamsize")
@@ -144,8 +164,6 @@ def prep_data_model(plotinitial=False):
     sigmap[np.isnan(sigmap)] = 0.0  # Remove nans
     idx = np.unravel_index(np.argmax(sigmap), dsh)
     idx = (dsh[0]//2, dsh[1]//2, idx[2])
-    nspat = 40
-    nspec = 70
     idx_min, idx_max = idx[2] - nspec, idx[2] + nspec
     if idx_min <= 0:
         idx_min = 0
@@ -156,11 +174,17 @@ def prep_data_model(plotinitial=False):
 
     datacut = fdata[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat, idx_min:idx_max]
     velocut = velo[idx_min:idx_max]
-    rmscut = rms[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat]
+    use_median = False
+    if use_median:
+        rmscut = rms[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat]
+    else:
+        print("Using line free regions to determine RMS")
+        datrms = fdata[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat, idx_max:]
+        rmscut = np.std(datrms, axis=2).reshape((datrms.shape[0], datrms.shape[1], 1))
 
     check_rms = False
     if check_rms:
-        datrms = fdata[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat, 2*idx_max:]
+        datrms = fdata[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat, idx_max:]
         val = np.std(datrms, axis=2)
         print(np.mean(val/rmscut), np.std(val/rmscut))
         print("Looks good to me!")
@@ -351,7 +375,6 @@ def run_mcmc(datacut, param, obspars, rad, priorarr):
 def myfunct(p, fjac=None, rad=None, fdata=None, err=None, obspars=None, sbrad=None):
     # Run make_model to produce a model cube
     model = make_model(p, obspars, rad, sbprof_rad=sbrad).flatten()
-    #model = make_model(p, obspars, rad).flatten()
 
     # Non-negative status value means MPFIT should
     # continue, negative means stop the calculation.
@@ -362,59 +385,64 @@ def myfunct(p, fjac=None, rad=None, fdata=None, err=None, obspars=None, sbrad=No
 def run_chisq(datacut, param, obspars, rad, priorarr):
     # Start with a better guess of the disk parameters
     param = np.array([1.145, 151.189245, 6.969, 0.035626, 0.0344, 0.1513, 0.8, 0.0764])
+    steps = np.array([1.0E-4, 0.1, 0.1, 1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4, 1.0E-4])*parscale
+    p0 = param * parscale
 
+    spline_sb = False
     #######################################
     #          PREPARE THE FIT
     #######################################
-    # Include the radial surface brightness profile as a free parameter
-    nsurfb = 9
-    sbradAU = (np.linspace(0.0, 11.0, nsurfb)**2)*u.AU
-    #sbradAU = np.array([0.0, 8.0, 25.0, 50.0, 80.0, 110.0]) * u.AU
-    sbrad = (sbradAU/dist).to(u.pc/u.pc).value  # in radians
-    sbrad *= 3600.0 * (180.0/np.pi)
-    sbrad = np.arange(0.0, 2.1, 0.4)
-    sbrad = np.array([0.0, 0.4, 0.8, 1.2, 1.4, 1.6, 1.8, 2.4, 3.0])
-    sbfunc = interpolate.interp1d(rad, obspars['sbprof'], kind='linear', bounds_error=False, fill_value=0.0)
-    sb_p0 = sbfunc(sbrad)
-    sb_p0 *= sbscale/np.max(sb_p0)
-    #sb_p0 *= 2.0
-    #sb_p0[0] = 1.0
-    #sb_p0 = np.array([1.0, 1.0, 1.0, 1.2, 1.4, 1.3, 1.2, 1.0, 0.8, 0.0])
-    sb_p0 = np.array([0.0, 0.4, 1.0, 1.0, 0.6, 0.2, 0.1, 0.05, 0.0])
-    debug = False
-    if debug:
-        sbfunc = interpolate.interp1d(sbrad, sb_p0/sbscale, kind='cubic', bounds_error=False, fill_value=0.0)
-        sbfunclin = interpolate.interp1d(sbrad, sb_p0/sbscale, kind='linear', bounds_error=False, fill_value=0.0)
-        sbProf = sbfunc(rad) / sbfunc(0.0)
-        sbProf_lin = sbfunclin(rad) / sbfunclin(0.0)
-        pdb.set_trace()
-        from matplotlib import pyplot as plt
-        plt.plot(rad, sbProf, 'b-')
-        plt.plot(rad, sbProf_lin, 'g-')
-        plt.plot(sbrad, sb_p0/sbscale, 'ro')
-        plt.show()
+    if spline_sb:
+        # Include the radial surface brightness profile as a free parameter
+        nsurfb = 9
+        sbradAU = (np.linspace(0.0, 11.0, nsurfb)**2)*u.AU
+        #sbradAU = np.array([0.0, 8.0, 25.0, 50.0, 80.0, 110.0]) * u.AU
+        sbrad = (sbradAU/dist).to(u.pc/u.pc).value  # in radians
+        sbrad *= 3600.0 * (180.0/np.pi)
+        sbrad = np.arange(0.0, 2.1, 0.4)
+        sbrad = np.array([0.0, 0.4, 0.8, 1.2, 1.4, 1.6, 1.8, 2.4, 3.0])
+        sbfunc = interpolate.interp1d(rad, obspars['sbprof'], kind='linear', bounds_error=False, fill_value=0.0)
+        sb_p0 = sbfunc(sbrad)
+        sb_p0 *= sbscale/np.max(sb_p0)
+        #sb_p0 *= 2.0
+        #sb_p0[0] = 1.0
+        #sb_p0 = np.array([1.0, 1.0, 1.0, 1.2, 1.4, 1.3, 1.2, 1.0, 0.8, 0.0])
+        sb_p0 = np.array([0.0, 0.4, 1.0, 1.0, 0.6, 0.2, 0.1, 0.05, 0.0])
+        debug = False
+        if debug:
+            sbfunc = interpolate.interp1d(sbrad, sb_p0/sbscale, kind='cubic', bounds_error=False, fill_value=0.0)
+            sbfunclin = interpolate.interp1d(sbrad, sb_p0/sbscale, kind='linear', bounds_error=False, fill_value=0.0)
+            sbProf = sbfunc(rad) / sbfunc(0.0)
+            sbProf_lin = sbfunclin(rad) / sbfunclin(0.0)
+            pdb.set_trace()
+            from matplotlib import pyplot as plt
+            plt.plot(rad, sbProf, 'b-')
+            plt.plot(rad, sbProf_lin, 'g-')
+            plt.plot(sbrad, sb_p0/sbscale, 'ro')
+            plt.show()
+    else:
+        sbrad = None
 
     # Set some reasonable starting conditions
-    p0 = param * parscale
-    p0 = np.append(p0, sb_p0)
-    p0 = np.array([1.13588617e+00,
-    1.51205286e+02,
-    6.03590770e+00,
-    3.55056672e-02,
-    3.32754764e-02,
-    -2.48859106e-01,
-    8.00000000e-01,
-    7.69351341e-02,
-    0.050000000e+00,
-    1.30848314e-01,
-    1.00625823e-01,
-    7.04162504e-02,
-    4.54162504e-02,
-    2.70166892e-02,
-    2.04162504e-02,
-    1.20166892e-02,
-    0.00000000e+00])
-    steps = np.array([1.0E-4, 0.1, 0.1, 1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4, 1.0E-4])*parscale
+    if spline_sb:
+        p0 = np.append(p0, sb_p0)
+        p0 = np.array([1.13588617e+00,
+        1.51205286e+02,
+        6.03590770e+00,
+        3.55056672e-02,
+        3.32754764e-02,
+        -2.48859106e-01,
+        8.00000000e-01,
+        7.69351341e-02,
+        0.050000000e+00,
+        1.30848314e-01,
+        1.00625823e-01,
+        7.04162504e-02,
+        4.54162504e-02,
+        2.70166892e-02,
+        2.04162504e-02,
+        1.20166892e-02,
+        0.00000000e+00])
     #stpsb = sb_p0*1.0E-2*np.ones(nsurfb)
     #steps = np.append(steps, stpsb)
     # param = np.array([intflux, posang, inc, centx, centy, voffset, masscen])
@@ -436,8 +464,8 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
     # Force the inner value of the surface brightness profile to be 1
     #param_info[len(param)]['fixed'] = 1
     #param_info[len(param)]['value'] = 1
-    param_info[-1]['fixed'] = 1
-    param_info[-1]['value'] = 0
+    #param_info[-1]['fixed'] = 1
+    #param_info[-1]['value'] = 0
     #param_info[6]['fixed'] = 1
     #param_info[6]['value'] = 0.8
 
@@ -449,7 +477,7 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
     #  PERFORM THE FIT AND PRINT RESULTS
     #######################################
 
-    m = mpfit.mpfit(myfunct, p0, parinfo=param_info, functkw=fa, quiet=False)
+    m = mpfit.mpfit(myfunct, p0, parinfo=param_info, functkw=fa, quiet=False, ncpus=4)
     if (m.status <= 0):
         print('error message = ', m.errmsg)
     print("param: ", m.params)
