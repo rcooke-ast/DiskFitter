@@ -6,8 +6,6 @@ The idea of this code is to fit one half of the datacube with the other to infer
 """
 
 import pdb
-import copy
-import mpfit
 import numpy as np
 import emcee
 from KinMS import *
@@ -20,7 +18,6 @@ import astropy.wcs as WCS
 import astropy.io.fits as fits
 import astropy.units as u
 from scipy import interpolate
-from makeplots import makeplots
 from matplotlib import pyplot as plt
 
 Gcons = 6.67408e-11 * u.m**3 / u.kg / u.s**2
@@ -29,7 +26,19 @@ dist = 59.5 * u.pc
 
 def make_model(fdata, param, obspars):
     # Take a random sample of the input distribution
-    np.round(obspars['nsamps'] * fdata).astype(np.int)
+    dsamp = np.round(obspars['nsamps'] * fdata).astype(np.int)
+    ww = np.where(dsamp != 0.0)
+    dget = dsamp[ww]
+    xvals, yvals, vvals = [], [], []
+    subarr...
+    for ii in range(dget.size):
+        xvals += dget[ii] * []
+        yvals += dget[ii] * []
+        vvals += dget[ii] * []
+    nval = np.sum(dsamp[ww])
+    xvals = np.zeros(nval)
+    yvals = np.zeros(nval)
+    vvals = np.zeros(nval)
 
     # This returns the model
     return model
@@ -109,7 +118,8 @@ def prep_data_model():
     (fname, freq0, nspat, nspec), dir = load_file(0), ""
 
     dfil = fits.open(dir+fname)
-    fdata = dfil[0].data.T[:, :, :, 0]
+#    fdata = dfil[0].data.T[:, :, :, 0]
+    fdata = dfil[0].data.T
     dsh = fdata.shape
     psh = (dsh[0], dsh[1], 1,)
 
@@ -184,6 +194,11 @@ def prep_data_model():
     dfil.close()
     del fdata, rms, sigmap
 
+    flipvelo = True
+    if flipvelo:
+        velocut = velocut[::-1]
+        datacut = datacut[:, :, ::-1]
+
     # Setup cube parameters #
     print("Set cube parameters")
     obspars = dict({})
@@ -200,7 +215,7 @@ def prep_data_model():
     cutname = dir+fname.replace(".fits", ".splitcube.cut.fits")
     hdr = fits.Header()
     for key in obspars.keys():
-        if key in ['rms']:
+        if key in ['rms', 'velocut']:
             continue
         hdr[key] = obspars[key]
     dathdu = fits.PrimaryHDU(datacut, header=hdr)
@@ -241,25 +256,25 @@ def prep_data_model():
 
     # Define the function
     pdb.set_trace()
-    pts = [np.arange(datacut.shape[0]), np.arange(datacut.shape[1]), velocut]
+    pts = [np.arange(datacut.shape[0]), np.arange(datacut.shape[1]), obspars['velocut']]
     datfunc = RegularGridInterpolator(pts, datacut, method='linear', bounds_error=False, fill_value=None)  # fill_value=None means extrapolate
     # Subpixellate
-    subpix = [3, 3, 3]
+    subpix = [2, 2, 2]
     subdsh = (subpix[0]*datacut.shape[0], subpix[1]*datacut.shape[1], subpix[2]*datacut.shape[2],)
     subarr = [None for all in subpix]
     for idx in range(len(subpix)):
         pxsz = pts[idx][1]-pts[idx][0]
         subpts = np.arange(pxsz/(2*subpix[0]), pxsz, pxsz/subpix[0]) - pxsz/2
         subarr[idx] = (pts[idx][:, np.newaxis] + subpts).flatten()
-    datsub = datfunc(np.meshgrid(subarr[0], subarr[1], subarr[2], indexing='ij')).reshape(subdsh)
+    samgrd = np.meshgrid(subarr[0], subarr[1], subarr[2], indexing='ij')
+    vst = np.vstack([samgrd[0].flatten(), samgrd[1].flatten(), samgrd[2].flatten()]).T
+    datsub = datfunc(vst).reshape(subdsh)
     # Normalise data
     datsub /= np.sum(datsub)
-    # TODO : Need to check this subpixellated array, and pass this onto the make_model function
-
-    return datacut, param, obspars, rad, priorarr
+    return datacut, [datsub, subarr], param, obspars, rad, priorarr
 
 
-def run_mcmc(datacut, param, obspars, rad, priorarr):
+def run_mcmc(datacut, datasub, param, obspars, priorarr):
     # Setup MCMC #
     ndim = param.size  # How many parameters to fit
     nwalkers = 200  # Minimum of 2 walkers per free parameter
@@ -293,8 +308,8 @@ def run_mcmc(datacut, param, obspars, rad, priorarr):
 if __name__ == "__main__":
     mcmc = False
     print("Preparing data...")
-    datacut, param, obspars, rad, priorarr = prep_data_model()
+    datacut, datasub, param, obspars, rad, priorarr = prep_data_model()
     print("complete")
     if mcmc:
         print("Running MCMC")
-        run_mcmc(datacut, param, obspars, rad, priorarr)
+        run_mcmc(datacut, param, obspars, priorarr)
