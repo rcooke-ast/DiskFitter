@@ -13,7 +13,7 @@ import os.path
 import sys
 import time
 import multiprocessing
-from scipy.interpolate import RegularGridInterpolator
+from scipy.interpolate import RegularGridInterpolator, UnivariateSpline
 import astropy.wcs as WCS
 import astropy.io.fits as fits
 import astropy.units as u
@@ -24,21 +24,57 @@ Gcons = 6.67408e-11 * u.m**3 / u.kg / u.s**2
 dist = 59.5 * u.pc
 
 
+def make_spline(xarr, yarr, dx=None, convcrit=1.0E-3):
+    """
+    Make a spline representation of the input arrays, where the spline
+    represents the integral from x-dx/2 to x+dx/2
+    """
+    if dx is None:
+        dx = np.ones(xarr.size)*(xarr[1]-xarr[0])
+    xsz = xarr.size
+    xl = xarr - dx/2.0
+    xu = np.roll(xl, -1)
+    xu[-1] = xarr[-1] + dx[-1]/2.0
+    # Iteratively update the spline
+    ynew = yarr.copy()
+    yint = yarr.copy()
+    iter=0
+    while True:
+        # Create the spline
+        spl = UnivariateSpline(xarr, ynew, k=3, bbox=[xl[0], xu[-1]])
+        # Calculate the integral
+        for xx in range(xsz):
+            yint[xx] = spl.integral(xl[xx], xu[xx])
+        # Update the values
+        corr = yarr-yint
+        ynew += corr*(xu-xl)
+        print(iter, np.max(np.abs(corr/yarr)))
+        pdb.set_trace()
+        if np.all(np.abs(corr/yarr) < convcrit):
+            break
+        iter += 1
+        if iter >= 100:
+            pdb.set_trace()
+    return UnivariateSpline(xarr, ynew, k=3, bbox=[xl[0], xu[-1]])
+
+
 def make_model(fdata, param, obspars):
     # Take a random sample of the input distribution
     dsamp = np.round(obspars['nsamps'] * fdata).astype(np.int)
     ww = np.where(dsamp != 0.0)
     dget = dsamp[ww]
     xvals, yvals, vvals = [], [], []
-    subarr...
+    print("ERROR :: Need to fix subarr line below")
+    assert(False)
+    subarr = 0.0
     for ii in range(dget.size):
         xvals += dget[ii] * []
         yvals += dget[ii] * []
         vvals += dget[ii] * []
     nval = np.sum(dsamp[ww])
-    xvals = np.zeros(nval)
-    yvals = np.zeros(nval)
-    vvals = np.zeros(nval)
+    xvals = np.array(xvals)
+    yvals = np.array(yvals)
+    vvals = np.array(vvals)
 
     # This returns the model
     return model
@@ -305,7 +341,58 @@ def run_mcmc(datacut, datasub, param, obspars, priorarr):
     np.save("splitcube_chains.npy", sampler.chain)
 
 
+def test_spline():
+    xarr = np.arange(10)+1
+    #yarr = 2.0*xarr**2*np.exp(-xarr/10.0) + 1/(1+xarr + xarr**2)
+    yarr = 2.0 * xarr ** 2 * np.exp(-xarr / 10.0) + 1 / (1 + xarr + xarr ** 2)
+    spl = make_spline(xarr, yarr, convcrit=1.0E-6)
+    pdb.set_trace()
+
+
+def make_spline_int(xint, xarr, yarr, delta=None):
+    from scipy.sparse import diags
+    from scipy.interpolate import PPoly
+    if delta is None:
+        delta = 0.5*(xarr[1]-xarr[0])
+    # Determine the b coeffs
+    b = np.zeros(xarr.size)
+    dd = diags([1, 4, 1], [-1, 0, 1], shape=(xarr.size - 2, xarr.size - 2))
+    rvec = 1.5*(yarr[2:]-yarr[:-2])/delta**2
+    b[1:-1] = np.linalg.solve(dd, rvec)
+
+    return yint
+
+
+def test_spline_int():
+    from scipy.special import erf
+    gmn = 4.5
+    gsg = 1.0
+    # Make the data
+    xarr = np.arange(10) + 1
+    delta = 0.5*(xarr[1]-xarr[0])
+    # Generate the true values
+    xtru = np.linspace(xarr[0]-delta, xarr[-1]+delta, 1000)
+    ytru = np.exp(-0.5*((xtru-gmn)/gsg)**2)
+    # Make the integrated spline
+    yint = np.zeros(xarr.size)
+    for xx in range(xarr.size):
+        xu = (xarr[xx]+delta - gmn)/(np.sqrt(2)*gsg)
+        xl = (xarr[xx]-delta - gmn)/(np.sqrt(2)*gsg)
+        yint[xx] = gsg * np.sqrt(np.pi/2.0) * (erf(xu) - erf(xl))
+    yspl = make_spline_int(xtru, xarr, yint, delta=delta)
+    # Make the traditional cubic spline
+    yarr = np.exp(-0.5 * ((xarr - gmn) / gsg) ** 2)
+    spl = UnivariateSpline(xarr, yarr, k=3, bbox=[xarr[0]-delta, xarr[-1]+delta])
+    # Plot up a comparison
+    plt.plot(xtru, ytru, 'r-')
+    plt.plot(xtru, spl(xtru), 'b-')
+    plt.show()
+
+
+
 if __name__ == "__main__":
+    test_spline()
+    assert(False)
     mcmc = False
     print("Preparing data...")
     datacut, datasub, param, obspars, rad, priorarr = prep_data_model()
