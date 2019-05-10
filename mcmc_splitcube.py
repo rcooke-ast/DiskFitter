@@ -351,15 +351,30 @@ def test_spline():
 
 def make_spline_int(xint, xarr, yarr, delta=None):
     from scipy.sparse import diags
+    from scipy.sparse.linalg import spsolve
     from scipy.interpolate import PPoly
+    pdb.set_trace()
     if delta is None:
-        delta = 0.5*(xarr[1]-xarr[0])
+        delta = xarr[1]-xarr[0]
+    # Initialise the coefficients array
+    coeffs = np.zeros((3, xarr.size))
     # Determine the b coeffs
-    b = np.zeros(xarr.size)
     dd = diags([1, 4, 1], [-1, 0, 1], shape=(xarr.size - 2, xarr.size - 2))
-    rvec = 1.5*(yarr[2:]-yarr[:-2])/delta**2
-    b[1:-1] = np.linalg.solve(dd, rvec)
-
+    rvec = 6.0*(yarr[1:-1]-yarr[:-2])/delta**2
+    coeffs[1, 1:-1] = spsolve(dd, rvec)
+    coeffs[1, 0] =
+    coeffs[1, -1] =
+    # Determine the a coeffs
+    coeffs[0, :-1] = 0.5*(coeffs[1, 1:] - coeffs[1, :-1])/delta
+    coeffs[0, -1] =
+    # Determine the c coeffs
+    coeffs[2, :] = yarr/delta - coeffs[0, :]*delta**2/3.0 - coeffs[1, :]*delta/2.0
+    # Construct the polynomial
+    spl = PPoly(coeffs, np.append(xarr-delta/2, xarr[-1]+delta/2))
+    yint = spl(xint)
+    plt.plot(xarr, yarr, 'bx')
+    plt.plot(xint, yint, 'r-')
+    plt.show()
     return yint
 
 
@@ -379,7 +394,7 @@ def test_spline_int():
         xu = (xarr[xx]+delta - gmn)/(np.sqrt(2)*gsg)
         xl = (xarr[xx]-delta - gmn)/(np.sqrt(2)*gsg)
         yint[xx] = gsg * np.sqrt(np.pi/2.0) * (erf(xu) - erf(xl))
-    yspl = make_spline_int(xtru, xarr, yint, delta=delta)
+    yspl = make_spline_int(xtru, xarr, yint)
     # Make the traditional cubic spline
     yarr = np.exp(-0.5 * ((xarr - gmn) / gsg) ** 2)
     spl = UnivariateSpline(xarr, yarr, k=3, bbox=[xarr[0]-delta, xarr[-1]+delta])
@@ -391,7 +406,7 @@ def test_spline_int():
 
 
 if __name__ == "__main__":
-    test_spline()
+    test_spline_int()
     assert(False)
     mcmc = False
     print("Preparing data...")
