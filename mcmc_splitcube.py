@@ -353,7 +353,6 @@ def make_spline_int(xint, xarr, yarr, delta=None):
     from scipy.sparse import diags
     from scipy.sparse.linalg import spsolve
     from scipy.interpolate import PPoly
-    pdb.set_trace()
     if delta is None:
         delta = xarr[1]-xarr[0]
     # Initialise the coefficients array
@@ -362,13 +361,15 @@ def make_spline_int(xint, xarr, yarr, delta=None):
     dd = diags([1, 4, 1], [-1, 0, 1], shape=(xarr.size - 2, xarr.size - 2))
     rvec = 6.0*(yarr[1:-1]-yarr[:-2])/delta**2
     coeffs[1, 1:-1] = spsolve(dd, rvec)
-    coeffs[1, 0] =
-    coeffs[1, -1] =
+    coeffs[1, 0] = 0.0
+    coeffs[1, -1] = 0.0
     # Determine the a coeffs
     coeffs[0, :-1] = 0.5*(coeffs[1, 1:] - coeffs[1, :-1])/delta
-    coeffs[0, -1] =
     # Determine the c coeffs
-    coeffs[2, :] = yarr/delta - coeffs[0, :]*delta**2/3.0 - coeffs[1, :]*delta/2.0
+    coeffs[2, :-1] = yarr[:-1]/delta - coeffs[0, :-1]*delta**2/3.0 - coeffs[1, :-1]*delta/2.0
+    # Get the final coefficnents
+    coeffs[2, -1] = coeffs[2, -2] + delta*coeffs[1, -2] + delta**2 * coeffs[0, -2]
+    coeffs[0, -1] = (3.0/delta**3) * (yarr[-1] - coeffs[2, -1]*delta - 0.5*coeffs[1, -1]*delta**2)
     # Construct the polynomial
     spl = PPoly(coeffs, np.append(xarr-delta/2, xarr[-1]+delta/2))
     yint = spl(xint)

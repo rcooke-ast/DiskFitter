@@ -110,7 +110,7 @@ def load_file(year=2011):
     return fname, freq0, nspat, nspec
 
 
-def prep_data_model(plotinitial=False):
+def prep_data_model(plotinitial=False, gencube=False):
     # Load in the observational data
     print("Load data -- Is it correct to transpose?")
     dir = "/Users/rcooke/Work/Research/Cosmo/SandageTest/ALMA/data/TWHya/"
@@ -202,11 +202,6 @@ def prep_data_model(plotinitial=False):
     psf = makebeam(xsize, ysize, [bmaj/cellsize, bmin/cellsize], rot=bpa)
     sumflux = np.sum(datacut)*dvelo/psf.sum()
 
-    # Save some memory
-    print("saving memory")
-    dfil.close()
-    del fdata, rms, sigmap
-
     # Setup a radius vector [arcseconds]
     radsamp = 10000
     rad = np.linspace(0., xsize/1.414, radsamp)
@@ -281,9 +276,9 @@ def prep_data_model(plotinitial=False):
     masscen = 0.8  # masscen
     min_masscen = 0.6  # Lower range masscen
     max_masscen = 1.0  # Upper range masscen
-    gassigma = 0.1  # masscen
-    min_gassigma = 0.0  # Lower range masscen
-    max_gassigma = 2.0  # Upper range masscen
+    gassigma = 0.2  # gas velocity dispersion
+    min_gassigma = 0.0  # Lower range velocity dispersion
+    max_gassigma = 2.0  # Upper range velocity dispersion
 
     rc = 1.0  # arcsec
     min_rc = 0.2  # Lower range masscen
@@ -302,6 +297,15 @@ def prep_data_model(plotinitial=False):
     priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset, max_masscen, max_gassigma]  # Maximum
     # priorarr[:, 0] = [minintflux, minposang, mininc, mincentx, mincenty, minvoffset, min_masscen, min_gassigma, min_rc, min_gamma]  # Minimum
     # priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset, max_masscen, max_gassigma, max_rc, max_gamma]  # Maximum
+
+    if gencube:
+        fsim = make_model(param, obspars, rad)
+        dathdu = fits.PrimaryHDU(fsim.T, header=dfil[0].header)
+        dathdu.writeto("gencube.fits", overwrite=True)
+    # Save some memory
+    print("saving memory")
+    dfil.close()
+    del fdata, rms, sigmap
 
     # Show what the initial model and data look like
     if plotinitial:
@@ -512,9 +516,10 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
 
 if __name__ == "__main__":
     mcmc = False
-    chisq = True
+    chisq = False
+    gencube = True
     print("Preparing data...")
-    datacut, param, obspars, rad, priorarr = prep_data_model()
+    datacut, param, obspars, rad, priorarr = prep_data_model(gencube=gencube)
     print("complete")
     if mcmc:
         print("Running MCMC")
