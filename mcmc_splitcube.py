@@ -12,12 +12,10 @@ from KinMS import *
 import os.path
 import sys
 import time
-import multiprocessing
 from scipy.interpolate import RegularGridInterpolator, UnivariateSpline
 import astropy.wcs as WCS
 import astropy.io.fits as fits
 import astropy.units as u
-from scipy import interpolate
 from matplotlib import pyplot as plt
 
 Gcons = 6.67408e-11 * u.m**3 / u.kg / u.s**2
@@ -25,6 +23,7 @@ dist = 59.5 * u.pc
 
 # Load some subsampled data
 if os.path.exists("datacut_subpix.npy"):
+    print("Loading subpixel files")
     datsub = np.load("datacut_subpix.npy")
     subarr0 = np.load("datacut_subarr0.npy")
     subarr1 = np.load("datacut_subarr1.npy")
@@ -41,43 +40,62 @@ def make_model(fdata, param, obspars):
     dsamp[ww] += 1
     ww = np.where(dsamp != 0.0)
     dget = dsamp[ww].astype(np.int)
-    xvals = subarr0[ww]
-    yvals = subarr1[ww]
-    vvals = subarr2[ww]
+    xvals = subarr0[ww[0]]
+    yvals = subarr1[ww[1]]
+    vvals = subarr2[ww[2]]
     xout = np.repeat(xvals, dget)
     yout = np.repeat(yvals, dget)
     vout = np.repeat(vvals, dget)
-    # xout = np.array([])
-    # yout = np.array([])
-    # vout = np.array([])
-    # for ii in range(dget.size):
-    #     xout = np.append(xout, xvals[ii]*np.ones(dget[ii]))
-    #     yout = np.append(yout, yvals[ii]*np.ones(dget[ii]))
-    #     vout = np.append(vout, vvals[ii]*np.ones(dget[ii]))
+
     # Perturb data within pixels
-    xout += np.random.uniform(-1.0/2.0, 1.0/2.0, xout.size)
-    yout += np.random.uniform(-1.0/2.0, 1.0/2.0, yout.size)
-    vout += np.random.uniform(-obspars['dv']/2.0, obspars['dv']/2.0, vout.size)
+    dx = subarr0[1] - subarr0[0]
+    dy = subarr1[1] - subarr1[0]
+    dv = subarr2[1] - subarr2[0]
+    xout += np.random.uniform(-dx/2.0, dx/2.0, xout.size)
+    yout += np.random.uniform(-dy/2.0, dy/2.0, yout.size)
+    vout += np.random.uniform(-dv/2.0, dv/2.0, vout.size)
 
     # Flip the clouds about the axis
-    xout = param[0] - xout
-    yout = param[1] - yout
-    vout = param[2] - vout
+    xout = 2*param[0] - xout
+    yout = 2*param[1] - yout
+    vout = 2*param[2] - vout
 
     # Rebin these to the old model shape
-    mask = np.zeros(fdata.shape)  # =1 when a coordinate value should be included in the fit
+    mask = np.ones(fdata.shape)  # =1 when a coordinate value should be included in the fit
     model = np.zeros(fdata.shape)
     # First generate the indices
-    xidx = np.int(xout + 0.5)
-    yidx = np.int(yout + 0.5)
-    vidx = np.int()
+    xidx = (xout + 0.5).astype(np.int)
+    yidx = (yout + 0.5).astype(np.int)
+    vidx = ((vout-obspars['velocut'][0])/obspars['dv'] + 0.5).astype(np.int)
+
     # If any of these values go out of bound, set the mask accordingly
-    mask
-    # Extract only the indices that are in bounds
-
-    # Finally, bin the result
-    np.add.at(model, (xidx, yidx, vidx,), 1)
-
+    xmn, xmx = np.min(xidx), np.max(xidx)
+    ymn, ymx = np.min(yidx), np.max(yidx)
+    vmn, vmx = np.min(vidx), np.max(vidx)
+    # Set x bounds
+    if xmn < 0:
+        mask[xmn:, :, :] = 0
+    if xmx >= fdata.shape[0]:
+        mask[:1+xmx-fdata.shape[0], :, :] = 0
+    # Set y bounds
+    if ymn < 0:
+        mask[:, ymn:, :] = 0
+    if ymx >= fdata.shape[1]:
+        mask[:, :1+ymx-fdata.shape[1], :] = 0
+    # Set v bounds
+    if vmn < 0:
+        mask[:, :, vmn:] = 0
+    if vmx >= fdata.shape[2]:
+        mask[:, :, :1+vmx-fdata.shape[1]] = 0
+    # Extract indices that are in bounds, and bin the result
+    ww = np.where((xidx >= 0) & (xidx < fdata.shape[0]) &
+                  (yidx >= 0) & (yidx < fdata.shape[1]) &
+                  (vidx >= 0) & (vidx < fdata.shape[2]))
+    np.add.at(model, (xidx[ww], yidx[ww], vidx[ww],), 1)
+    # import astropy.io.fits as fits
+    # dathdu = fits.PrimaryHDU(model.T)
+    # dathdu.writeto("model.fits", overwrite=True)
+    # pdb.set_trace()
     # Return the flipped model
     return model, mask
 
@@ -227,6 +245,9 @@ def prep_data_model():
     xsize = datacut.shape[0]*cellsize
     ysize = datacut.shape[1]*cellsize
 
+    print("Should probably do better than this for rms!!")
+    rmscut = np.mean(rms)
+
     # Save some memory
     print("saving memory")
     dfil.close()
@@ -245,7 +266,7 @@ def prep_data_model():
     obspars['vsize'] = vsize+dvelo  # km/s
     obspars['cellsize'] = cellsize  # arcseconds/pixel
     obspars['dv'] = dvelo  # km/s/channel
-    obspars['nsamps'] = 5e5  # Number of cloudlets to use for KinMS models
+    obspars['nsamps'] = 5e7  # Number of cloudlets to use for KinMS models
     obspars['rms'] = rmscut  # RMS of data
     obspars['velocut'] = velocut
 
@@ -269,19 +290,19 @@ def prep_data_model():
         print(key, obspars[key])
 
     # Make guesses for the parameters, and set prior ranges
-    labels = ['posang', 'centx', 'centy', 'voffset']  # name of each variable, for plot
-    posang = 150.  # Best fit posang.
-    minposang = 90.  # Min posang.
-    maxposang = 180.  # Max posang.
-    centx = 0.0  # Best fit x-pos for kinematic centre
-    mincentx = -5.0  # min cent x
-    maxcentx = 5.0  # max cent x
-    centy = 0.0  # Best fit y-pos for kinematic centre
-    mincenty = -5.0  # min cent y
-    maxcenty = 5.0  # max cent y
-    voffset = 0.0  # Best fit velocity centroid
-    minvoffset = -vsize/2  # min velocity centroid
-    maxvoffset = +vsize/2  # max velocity centroid
+    labels = ['centx', 'centy', 'voffset']  # name of each variable, for plot
+    # posang = 150.  # Best fit posang.
+    # minposang = 90.  # Min posang.
+    # maxposang = 180.  # Max posang.
+    centx = datacut.shape[0]/2  # Best fit x-pos for kinematic centre
+    mincentx = centx-10.0  # min cent x
+    maxcentx = centx+10.0  # max cent x
+    centy = datacut.shape[1]/2  # Best fit y-pos for kinematic centre
+    mincenty = centy-10.0  # min cent y
+    maxcenty = centy+10.0  # max cent y
+    voffset = np.mean(velocut)  # Best fit velocity centroid
+    minvoffset = voffset-5*dvelo  # min velocity centroid
+    maxvoffset = voffset+5*dvelo  # max velocity centroid
 
     # starting best guess #
     param = np.array([centx, centy, voffset])
@@ -298,12 +319,12 @@ def prep_data_model():
         pts = [np.arange(datacut.shape[0]), np.arange(datacut.shape[1]), obspars['velocut']]
         datfunc = RegularGridInterpolator(pts, datacut, method='linear', bounds_error=False, fill_value=None)  # fill_value=None means extrapolate
         # Subpixellate
-        subpix = [3, 3, 1]
+        subpix = [1, 1, 1]
         subdsh = (subpix[0]*datacut.shape[0], subpix[1]*datacut.shape[1], subpix[2]*datacut.shape[2],)
         subarr = [None for all in subpix]
         for idx in range(len(subpix)):
             pxsz = pts[idx][1]-pts[idx][0]
-            subpts = np.arange(pxsz/(2*subpix[0]), pxsz, pxsz/subpix[0]) - pxsz/2
+            subpts = np.arange(pxsz/(2*subpix[idx]), pxsz, pxsz/subpix[idx]) - pxsz/2
             subarr[idx] = (pts[idx][:, np.newaxis] + subpts).flatten()
         print("Constructing mesh grid")
         samgrd = np.meshgrid(subarr[0], subarr[1], subarr[2], indexing='ij')
@@ -324,22 +345,30 @@ def prep_data_model():
 def run_mcmc(datacut, param, obspars, priorarr):
     # Setup MCMC #
     ndim = param.size  # How many parameters to fit
-    nwalkers = 200  # Minimum of 2 walkers per free parameter
-    mcmc_steps = 20000  # How many sample you want to take of the PDF. 3000 is reasonable for a test, larger the better for actual parameter estimation.
-    nsteps = mcmc_steps / nwalkers  # Each walker must take this many steps to give a total of mcmc_steps steps
+    nwalkers = 12  # Minimum of 2 walkers per free parameter
+    mcmc_steps = 1200#0000  # How many sample you want to take of the PDF. 3000 is reasonable for a test, larger the better for actual parameter estimation.
+    nsteps = mcmc_steps // nwalkers  # Each walker must take this many steps to give a total of mcmc_steps steps
+
+    debug = False
+    if debug:
+        print("Running a test")
+        #lnprob(param, obspars, datacut, priorarr)
+        make_model(datacut, param, obspars)
 
     # How many CPUs to use. Here I am allowing half of the CPUs. Change this if you want more/less.
-    cpus2use = 6
+    cpus2use = 1
 
     # Code to run the MCMC
     t0 = time.time()
 
     pos = [np.random.uniform(priorarr[:, 0], priorarr[:, 1]) for i in range(nwalkers)]
 
+    print("Setting up sampler")
     sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(obspars, datacut, priorarr),
                                     threads=cpus2use)  # Setup the sampler
 
     # Run the samples, while outputing a progress bar to the screen, and writing progress to the file.
+    print("Run the samples")
     width = 30
     for i, result in enumerate(sampler.sample(pos, iterations=nsteps)):
         n = int((width + 1) * float(i) / nsteps)
@@ -350,14 +379,6 @@ def run_mcmc(datacut, param, obspars, priorarr):
 
     print("Saving samples")
     np.save("splitcube_chains.npy", sampler.chain)
-
-
-def test_spline():
-    xarr = np.arange(10)+1
-    #yarr = 2.0*xarr**2*np.exp(-xarr/10.0) + 1/(1+xarr + xarr**2)
-    yarr = 2.0 * xarr ** 2 * np.exp(-xarr / 10.0) + 1 / (1 + xarr + xarr ** 2)
-    spl = make_spline(xarr, yarr, convcrit=1.0E-6)
-    pdb.set_trace()
 
 
 def make_spline_int(xint, xarr, yarr, delta=None):
@@ -426,7 +447,7 @@ def test_spline_int():
 if __name__ == "__main__":
     #test_spline_int()
     #assert(False)
-    mcmc = False
+    mcmc = True
     print("Preparing data...")
     datacut, param, obspars, priorarr = prep_data_model()
     print("complete")
