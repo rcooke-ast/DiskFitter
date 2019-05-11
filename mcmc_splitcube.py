@@ -23,71 +23,73 @@ from matplotlib import pyplot as plt
 Gcons = 6.67408e-11 * u.m**3 / u.kg / u.s**2
 dist = 59.5 * u.pc
 
-
-def make_spline(xarr, yarr, dx=None, convcrit=1.0E-3):
-    """
-    Make a spline representation of the input arrays, where the spline
-    represents the integral from x-dx/2 to x+dx/2
-    """
-    if dx is None:
-        dx = np.ones(xarr.size)*(xarr[1]-xarr[0])
-    xsz = xarr.size
-    xl = xarr - dx/2.0
-    xu = np.roll(xl, -1)
-    xu[-1] = xarr[-1] + dx[-1]/2.0
-    # Iteratively update the spline
-    ynew = yarr.copy()
-    yint = yarr.copy()
-    iter=0
-    while True:
-        # Create the spline
-        spl = UnivariateSpline(xarr, ynew, k=3, bbox=[xl[0], xu[-1]])
-        # Calculate the integral
-        for xx in range(xsz):
-            yint[xx] = spl.integral(xl[xx], xu[xx])
-        # Update the values
-        corr = yarr-yint
-        ynew += corr*(xu-xl)
-        print(iter, np.max(np.abs(corr/yarr)))
-        pdb.set_trace()
-        if np.all(np.abs(corr/yarr) < convcrit):
-            break
-        iter += 1
-        if iter >= 100:
-            pdb.set_trace()
-    return UnivariateSpline(xarr, ynew, k=3, bbox=[xl[0], xu[-1]])
+# Load some subsampled data
+if os.path.exists("datacut_subpix.npy"):
+    datsub = np.load("datacut_subpix.npy")
+    subarr0 = np.load("datacut_subarr0.npy")
+    subarr1 = np.load("datacut_subarr1.npy")
+    subarr2 = np.load("datacut_subarr2.npy")
 
 
 def make_model(fdata, param, obspars):
     # Take a random sample of the input distribution
-    dsamp = np.round(obspars['nsamps'] * fdata).astype(np.int)
+    sampval = obspars['nsamps'] * datsub
+    dsamp = np.floor(sampval)
+    dextr = (sampval-dsamp)
+    rands = np.random.uniform(0.0, 1.0, dextr.shape)
+    ww = np.where(dextr > rands)
+    dsamp[ww] += 1
     ww = np.where(dsamp != 0.0)
-    dget = dsamp[ww]
-    xvals, yvals, vvals = [], [], []
-    print("ERROR :: Need to fix subarr line below")
-    assert(False)
-    subarr = 0.0
-    for ii in range(dget.size):
-        xvals += dget[ii] * []
-        yvals += dget[ii] * []
-        vvals += dget[ii] * []
-    nval = np.sum(dsamp[ww])
-    xvals = np.array(xvals)
-    yvals = np.array(yvals)
-    vvals = np.array(vvals)
+    dget = dsamp[ww].astype(np.int)
+    xvals = subarr0[ww]
+    yvals = subarr1[ww]
+    vvals = subarr2[ww]
+    xout = np.repeat(xvals, dget)
+    yout = np.repeat(yvals, dget)
+    vout = np.repeat(vvals, dget)
+    # xout = np.array([])
+    # yout = np.array([])
+    # vout = np.array([])
+    # for ii in range(dget.size):
+    #     xout = np.append(xout, xvals[ii]*np.ones(dget[ii]))
+    #     yout = np.append(yout, yvals[ii]*np.ones(dget[ii]))
+    #     vout = np.append(vout, vvals[ii]*np.ones(dget[ii]))
+    # Perturb data within pixels
+    xout += np.random.uniform(-1.0/2.0, 1.0/2.0, xout.size)
+    yout += np.random.uniform(-1.0/2.0, 1.0/2.0, yout.size)
+    vout += np.random.uniform(-obspars['dv']/2.0, obspars['dv']/2.0, vout.size)
 
-    # This returns the model
-    return model
+    # Flip the clouds about the axis
+    xout = param[0] - xout
+    yout = param[1] - yout
+    vout = param[2] - vout
+
+    # Rebin these to the old model shape
+    mask = np.zeros(fdata.shape)  # =1 when a coordinate value should be included in the fit
+    model = np.zeros(fdata.shape)
+    # First generate the indices
+    xidx = np.int(xout + 0.5)
+    yidx = np.int(yout + 0.5)
+    vidx = np.int()
+    # If any of these values go out of bound, set the mask accordingly
+    mask
+    # Extract only the indices that are in bounds
+
+    # Finally, bin the result
+    np.add.at(model, (xidx, yidx, vidx,), 1)
+
+    # Return the flipped model
+    return model, mask
 
 
 def lnlike(param, obspars, fdata):
     # This function calculates the log-likelihood, comparing model and data
 
     # Run make_model to produce a model cube
-    modout = make_model(fdata, param, obspars)
+    modout, mskout = make_model(fdata, param, obspars)
 
     # calculate the chi^2
-    chiconv = (((fdata - modout) ** 2) / ((obspars['rms']) ** 2)).sum()
+    chiconv = (mskout*(((fdata - modout) ** 2) / ((obspars['rms']) ** 2))).sum()
 
     # covert to log-likelihood
     like = -0.5 * (chiconv - fdata.size)
@@ -282,35 +284,44 @@ def prep_data_model():
     maxvoffset = +vsize/2  # max velocity centroid
 
     # starting best guess #
-    param = np.array([posang, centx, centy, voffset])
+    param = np.array([centx, centy, voffset])
     #param = np.array([intflux, posang, inc, centx, centy, voffset, masscen, gassigma, rc, gamma])
 
     # Setup array for priors - in this code all priors are uniform #
     priorarr = np.zeros((param.size, 2))
-    priorarr[:, 0] = [minposang, mincentx, mincenty, minvoffset]  # Minimum
-    priorarr[:, 1] = [maxposang, maxcentx, maxcenty, maxvoffset]  # Maximum
+    priorarr[:, 0] = [mincentx, mincenty, minvoffset]  # Minimum
+    priorarr[:, 1] = [maxcentx, maxcenty, maxvoffset]  # Maximum
 
     # Define the function
-    pdb.set_trace()
-    pts = [np.arange(datacut.shape[0]), np.arange(datacut.shape[1]), obspars['velocut']]
-    datfunc = RegularGridInterpolator(pts, datacut, method='linear', bounds_error=False, fill_value=None)  # fill_value=None means extrapolate
-    # Subpixellate
-    subpix = [2, 2, 2]
-    subdsh = (subpix[0]*datacut.shape[0], subpix[1]*datacut.shape[1], subpix[2]*datacut.shape[2],)
-    subarr = [None for all in subpix]
-    for idx in range(len(subpix)):
-        pxsz = pts[idx][1]-pts[idx][0]
-        subpts = np.arange(pxsz/(2*subpix[0]), pxsz, pxsz/subpix[0]) - pxsz/2
-        subarr[idx] = (pts[idx][:, np.newaxis] + subpts).flatten()
-    samgrd = np.meshgrid(subarr[0], subarr[1], subarr[2], indexing='ij')
-    vst = np.vstack([samgrd[0].flatten(), samgrd[1].flatten(), samgrd[2].flatten()]).T
-    datsub = datfunc(vst).reshape(subdsh)
-    # Normalise data
-    datsub /= np.sum(datsub)
-    return datacut, [datsub, subarr], param, obspars, rad, priorarr
+    regenerate = False
+    if regenerate:
+        pts = [np.arange(datacut.shape[0]), np.arange(datacut.shape[1]), obspars['velocut']]
+        datfunc = RegularGridInterpolator(pts, datacut, method='linear', bounds_error=False, fill_value=None)  # fill_value=None means extrapolate
+        # Subpixellate
+        subpix = [3, 3, 1]
+        subdsh = (subpix[0]*datacut.shape[0], subpix[1]*datacut.shape[1], subpix[2]*datacut.shape[2],)
+        subarr = [None for all in subpix]
+        for idx in range(len(subpix)):
+            pxsz = pts[idx][1]-pts[idx][0]
+            subpts = np.arange(pxsz/(2*subpix[0]), pxsz, pxsz/subpix[0]) - pxsz/2
+            subarr[idx] = (pts[idx][:, np.newaxis] + subpts).flatten()
+        print("Constructing mesh grid")
+        samgrd = np.meshgrid(subarr[0], subarr[1], subarr[2], indexing='ij')
+        print("Stacking")
+        vst = np.vstack([samgrd[0].flatten(), samgrd[1].flatten(), samgrd[2].flatten()]).T
+        print("Evaluating subpixelled model")
+        datsub = datfunc(vst).reshape(subdsh)
+        print("Normalising and saving")
+        # Normalise data
+        datsub /= np.sum(datsub)
+        np.save("datacut_subpix", datsub)
+        np.save("datacut_subarr0", subarr[0])
+        np.save("datacut_subarr1", subarr[1])
+        np.save("datacut_subarr2", subarr[2])
+    return datacut, param, obspars, priorarr
 
 
-def run_mcmc(datacut, datasub, param, obspars, priorarr):
+def run_mcmc(datacut, param, obspars, priorarr):
     # Setup MCMC #
     ndim = param.size  # How many parameters to fit
     nwalkers = 200  # Minimum of 2 walkers per free parameter
@@ -373,7 +384,9 @@ def make_spline_int(xint, xarr, yarr, delta=None):
     # Construct the polynomial
     spl = PPoly(coeffs, np.append(xarr-delta/2, xarr[-1]+delta/2))
     yint = spl(xint)
-    plt.plot(xarr, yarr, 'bx')
+    pdb.set_trace()
+    print(yarr/delta - spl(xarr))
+    plt.plot(xarr, yarr/delta, 'bx')
     plt.plot(xint, yint, 'r-')
     plt.show()
     return yint
@@ -381,13 +394,14 @@ def make_spline_int(xint, xarr, yarr, delta=None):
 
 def test_spline_int():
     from scipy.special import erf
-    gmn = 4.5
+    gmn = 4.678
     gsg = 1.0
     # Make the data
+    #xarr = (np.arange(50)/5 + 1)
     xarr = np.arange(10) + 1
     delta = 0.5*(xarr[1]-xarr[0])
     # Generate the true values
-    xtru = np.linspace(xarr[0]-delta, xarr[-1]+delta, 1000)
+    xtru = np.linspace(xarr[0]-delta, xarr[-1]+delta, 10000)
     ytru = np.exp(-0.5*((xtru-gmn)/gsg)**2)
     # Make the integrated spline
     yint = np.zeros(xarr.size)
@@ -398,20 +412,23 @@ def test_spline_int():
     yspl = make_spline_int(xtru, xarr, yint)
     # Make the traditional cubic spline
     yarr = np.exp(-0.5 * ((xarr - gmn) / gsg) ** 2)
-    spl = UnivariateSpline(xarr, yarr, k=3, bbox=[xarr[0]-delta, xarr[-1]+delta])
+    spl = UnivariateSpline(xarr, yarr, k=2, s=0, bbox=[xarr[0]-delta, xarr[-1]+delta])
+    pdb.set_trace()
     # Plot up a comparison
     plt.plot(xtru, ytru, 'r-')
+    plt.plot(xtru, yspl, 'k--')
     plt.plot(xtru, spl(xtru), 'b-')
+    plt.plot(xarr, yarr, 'mx')
+    print(gmn, xtru[np.argmax(yspl)], xtru[np.argmax(spl(xtru))])
     plt.show()
 
 
-
 if __name__ == "__main__":
-    test_spline_int()
-    assert(False)
+    #test_spline_int()
+    #assert(False)
     mcmc = False
     print("Preparing data...")
-    datacut, datasub, param, obspars, rad, priorarr = prep_data_model()
+    datacut, param, obspars, priorarr = prep_data_model()
     print("complete")
     if mcmc:
         print("Running MCMC")
