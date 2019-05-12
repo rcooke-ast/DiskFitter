@@ -319,7 +319,7 @@ def prep_data_model():
         pts = [np.arange(datacut.shape[0]), np.arange(datacut.shape[1]), obspars['velocut']]
         datfunc = RegularGridInterpolator(pts, datacut, method='linear', bounds_error=False, fill_value=None)  # fill_value=None means extrapolate
         # Subpixellate
-        subpix = [1, 1, 1]
+        subpix = [1, 1, 5]
         subdsh = (subpix[0]*datacut.shape[0], subpix[1]*datacut.shape[1], subpix[2]*datacut.shape[2],)
         subarr = [None for all in subpix]
         for idx in range(len(subpix)):
