@@ -18,7 +18,7 @@ from matplotlib import pyplot as plt
 Gcons = 6.67408e-11 * u.m**3 / u.kg / u.s**2
 dist = 59.5 * u.pc
 
-parscale = 1.0 + 0.0*np.array([10.0, 0.1, 1.0, 1.0E4, 1.0E4, 1.0E4, 1.0, 1.0])
+parscale = 1.0 + 0.0*np.array([10.0, 0.1, 1.0, 1.0, 1.0E4, 1.0E4, 1.0E4, 1.0, 1.0])
 #parscale = 1.0 + 0.0*np.array([10.0, 0.1, 1.0, 1.0E4, 1.0E4, 1.0E4, 1.0, 1.0, 1.0, 1.0])
 sbscale = 1.0
 
@@ -35,21 +35,27 @@ def make_model(param, obspars, rad, sbprof_rad=None):
         sbfunc = interpolate.interp1d(sbprof_rad, param[-sbprof_rad.size:]/sbscale, kind='cubic', bounds_error=False, fill_value=0.0)
         sbProf = sbfunc(rad)
         sbProf *= 1.0/np.max(sbProf)
-        param[:8] /= parscale
+        param[:9] /= parscale
         sbProf[sbProf < 0.0] = 0.0
+
+    intflux, posang, inc, incout, centx, centy, voffset, masscen, gassigma =\
+        param[0], param[1], param[2], param[3], param[4], param[5], param[6], param[7], param[8]
 
     # Convert input rad [in arcsec] to radians
     rpar = rad * (np.pi/180.0) / 3600.0
 
     # Use a Keplerian disk, with the central Mass [M_sun] as a free parameter
-    Mstar = param[6] * u.Msun / dist
+    Mstar = masscen * u.Msun / dist
     vel = np.sqrt(Gcons * Mstar / rpar).to(u.km/u.s).value
+
+    # Determine the inclination as a function of radial coordinate
+    inc_rad = np.linspace(inc, incout, rad.size)
 
     # This returns the model
     return KinMS(obspars['xsize'], obspars['ysize'], obspars['vsize'], obspars['cellsize'], obspars['dv'],
-                 obspars['beamsize'], param[2], sbProf=sbProf, sbRad=rad, velRad=rad, velProf=vel,
-                 nSamps=obspars['nsamps'], intFlux=param[0], posAng=param[1], gasSigma=param[7],
-                 phaseCen=[param[3], param[4]], vOffset=param[5], fixSeed=True)
+                 obspars['beamsize'], inc_rad, sbProf=sbProf, sbRad=rad, velRad=rad, velProf=vel,
+                 nSamps=obspars['nsamps'], intFlux=param[0], posAng=param[1], gasSigma=gassigma,
+                 phaseCen=[centx, centy], vOffset=voffset, fixSeed=True)
 
 
 def lnlike(param, obspars, rad, fdata):
@@ -99,23 +105,27 @@ def load_file(year=2011):
         # 12CO(3-2)  --  2011.0.00399.S
         fname = "TW_Hya_2011.0.00399.S_12CO3-2.fits"
         freq0 = 345.79598990*1.0E9
-        nspat = 100
-        nspec = 70
+        # nspat = 100
+        # nspec = 70
+        nspat = 75
+        nspec = 10
+        idx = (216, 197, 99)
     elif year == 2016:
         # CSv0  --  2016.1.00440.S
         fname = "TW_Hya_contsub_CSv0-tclean.image.pbcor.fits"
         freq0 = 342.882857*1.0E9
         nspat = 40
         nspec = 70
-    return fname, freq0, nspat, nspec
+        idx = None
+    return fname, freq0, nspat, nspec, idx
 
 
 def prep_data_model(plotinitial=False):
     # Load in the observational data
     print("Load data -- Is it correct to transpose?")
     dir = "/Users/rcooke/Work/Research/Cosmo/SandageTest/ALMA/data/TWHya/"
-    #fname, freq0, nspat, nspec = load_file(2016)
-    fname, freq0, nspat, nspec = load_file(2011)
+    #fname, freq0, nspat, nspec, idx = load_file(2016)
+    fname, freq0, nspat, nspec, idx = load_file(2011)
 
     dfil = fits.open(dir+fname)
     fdata = dfil[0].data.T[:, :, :, 0]
@@ -162,8 +172,9 @@ def prep_data_model(plotinitial=False):
     print("extract data to be used for fitting")
     sigmap = fdata/rms
     sigmap[np.isnan(sigmap)] = 0.0  # Remove nans
-    idx = np.unravel_index(np.argmax(sigmap), dsh)
-    idx = (dsh[0]//2, dsh[1]//2, idx[2])
+    if idx is None:
+        idx = np.unravel_index(np.argmax(sigmap), dsh)
+        idx = (dsh[0]//2, dsh[1]//2, idx[2])
     idx_min, idx_max = idx[2] - nspec, idx[2] + nspec
     if idx_min <= 0:
         idx_min = 0
@@ -179,7 +190,9 @@ def prep_data_model(plotinitial=False):
         rmscut = rms[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat]
     else:
         print("Using line free regions to determine RMS")
-        datrms = fdata[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat, idx_max:]
+        datrms_a = fdata[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat, :30]
+        datrms_b = fdata[idx[0]-nspat:idx[0]+nspat, idx[1]-nspat:idx[1]+nspat, -30:]
+        datrms = np.append(datrms_a, datrms_b, axis=2)
         rmscut = np.std(datrms, axis=2).reshape((datrms.shape[0], datrms.shape[1], 1))
 
     check_rms = False
@@ -229,8 +242,9 @@ def prep_data_model(plotinitial=False):
     obspars['cellsize'] = cellsize  # arcseconds/pixel
     obspars['dv'] = dvelo  # km/s/channel
     obspars['beamsize'] = np.array([bmaj, bmin, bpa])  # (arcsec, arcsec, degrees)
-    obspars['nsamps'] = 5e5  # Number of cloudlets to use for KinMS models
-    obspars['rms'] = rmscut  # RMS of data
+    obspars['nsamps'] = 2e6  # Number of cloudlets to use for KinMS models
+    #obspars['rms'] = rmscut  # RMS of data
+    obspars['rms'] = np.median(rmscut)  # RMS of data
     obspars['sbprof'] = sb_profile  # Surface brightness profile
     obspars['velocut0'] = velocut[0]
 
@@ -269,6 +283,9 @@ def prep_data_model(plotinitial=False):
     inc = 10.  # degrees
     mininc = 5.0  # Min inc
     maxinc = 15.0  # Max inc
+    incout = 10.  # degrees
+    minincout = 5.0  # Min inc
+    maxincout = 15.0  # Max inc
     centx = 0.0  # Best fit x-pos for kinematic centre
     mincentx = -5.0  # min cent x
     maxcentx = 5.0  # max cent x
@@ -281,7 +298,7 @@ def prep_data_model(plotinitial=False):
     masscen = 0.8  # masscen
     min_masscen = 0.6  # Lower range masscen
     max_masscen = 1.0  # Upper range masscen
-    gassigma = 0.1  # masscen
+    gassigma = 0.35  # masscen
     min_gassigma = 0.0  # Lower range masscen
     max_gassigma = 2.0  # Upper range masscen
 
@@ -293,20 +310,24 @@ def prep_data_model(plotinitial=False):
     max_gamma = 5.0  # Upper range masscen
 
     # starting best guess #
-    param = np.array([intflux, posang, inc, centx, centy, voffset, masscen, gassigma])
+    param = np.array([intflux, posang, inc, incout, centx, centy, voffset, masscen, gassigma])
     #param = np.array([intflux, posang, inc, centx, centy, voffset, masscen, gassigma, rc, gamma])
 
     # Setup array for priors - in this code all priors are uniform #
     priorarr = np.zeros((param.size, 2))
-    priorarr[:, 0] = [minintflux, minposang, mininc, mincentx, mincenty, minvoffset, min_masscen, min_gassigma]  # Minimum
-    priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset, max_masscen, max_gassigma]  # Maximum
+    priorarr[:, 0] = [minintflux, minposang, mininc, minincout, mincentx, mincenty, minvoffset, min_masscen, min_gassigma]  # Minimum
+    priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxincout, maxcentx, maxcenty, maxvoffset, max_masscen, max_gassigma]  # Maximum
     # priorarr[:, 0] = [minintflux, minposang, mininc, mincentx, mincenty, minvoffset, min_masscen, min_gassigma, min_rc, min_gamma]  # Minimum
     # priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset, max_masscen, max_gassigma, max_rc, max_gamma]  # Maximum
 
     # Show what the initial model and data look like
     if plotinitial:
-        makeplots(fsim, obspars['xsize'], obspars['ysize'], obspars['vsize'], obspars['cellsize'], obspars['dv'],
-                  obspars['beamsize'], rms=obspars['rms'], posang=param[1])
+        param = np.array([38.47846005, 154.1374311, 5.144372096, 0.0, 0.0, 0.0001134311081, 0.996607506, 0.2810434911])
+        fsim = make_model(param, obspars, rad)
+        dathdu = fits.PrimaryHDU(fsim.T)
+        dathdu.writeto("init_sim.fits", overwrite=True)
+        #makeplots(fsim, obspars['xsize'], obspars['ysize'], obspars['vsize'], obspars['cellsize'], obspars['dv'],
+        #          obspars['beamsize'], rms=obspars['rms'], posang=param[1])
         print("[Initial model - close plot to continue]")
 
     return datacut, param, obspars, rad, priorarr
@@ -374,7 +395,16 @@ def run_mcmc(datacut, param, obspars, rad, priorarr):
 
 def myfunct(p, fjac=None, rad=None, fdata=None, err=None, obspars=None, sbrad=None):
     # Run make_model to produce a model cube
-    model = make_model(p, obspars, rad, sbprof_rad=sbrad).flatten()
+    model = make_model(p, obspars, rad, sbprof_rad=sbrad)#.flatten()
+    # Force the central pixels to not contribute to the chi-squared
+    msk = np.zeros(model.shape, dtype=np.bool)
+    nsub = 10
+    xmin, xmax = model.shape[0]//2 - nsub, model.shape[0]//2 + nsub+1
+    ymin, ymax = model.shape[1]//2 - nsub, model.shape[1]//2 + nsub+1
+    msk[xmin:xmax, ymin:ymax, :] = True
+    msk = msk.flatten()
+    model = model.flatten()
+    model[msk] = fdata[msk]
 
     # Non-negative status value means MPFIT should
     # continue, negative means stop the calculation.
@@ -384,30 +414,33 @@ def myfunct(p, fjac=None, rad=None, fdata=None, err=None, obspars=None, sbrad=No
 
 def run_chisq(datacut, param, obspars, rad, priorarr):
     # Start with a better guess of the disk parameters
-    param = np.array([1.145, 151.189245, 6.969, 0.035626, 0.0344, 0.1513, 0.8, 0.0764])
-    steps = np.array([1.0E-4, 0.1, 0.1, 1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4, 1.0E-4])*parscale
+    #param = np.array([1.145, 151.189245, 6.969, 0.035626, 0.0344, 0.1513, 0.8, 0.0764])
+    #param = np.array([1.145, 151.189245, 6.969, 0.035626, 0.0344, 0.1513, 0.8, 0.3])
+    param = np.array([21.27846005, 146.7374311, 9.144372096, 9.644372096, -0.015626, 0.0544, 0.005134311081, 0.848, 0.3310434911])
+    steps = np.array([1.0E-4, 0.01, 0.01, 0.01, 1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4, 1.0E-4])*parscale
     p0 = param * parscale
 
-    spline_sb = False
+    spline_sb = True
     #######################################
     #          PREPARE THE FIT
     #######################################
     if spline_sb:
         # Include the radial surface brightness profile as a free parameter
-        nsurfb = 9
-        sbradAU = (np.linspace(0.0, 11.0, nsurfb)**2)*u.AU
+        nsurfb = 20
+        #sbradAU = (np.linspace(0.0, 11.0, nsurfb)**2)*u.AU
         #sbradAU = np.array([0.0, 8.0, 25.0, 50.0, 80.0, 110.0]) * u.AU
-        sbrad = (sbradAU/dist).to(u.pc/u.pc).value  # in radians
-        sbrad *= 3600.0 * (180.0/np.pi)
-        sbrad = np.arange(0.0, 2.1, 0.4)
-        sbrad = np.array([0.0, 0.4, 0.8, 1.2, 1.4, 1.6, 1.8, 2.4, 3.0])
+        #sbrad = (sbradAU/dist).to(u.pc/u.pc).value  # in radians
+        #sbrad *= 3600.0 * (180.0/np.pi)
+        #sbrad = np.arange(0.0, 2.1, 0.4)
+        #sbrad = np.array([0.0, 0.4, 0.8, 1.2, 1.4, 1.6, 1.8, 2.4, 3.0])
+        sbrad = np.linspace(0.0, np.sqrt(4.25), nsurfb)**2
         sbfunc = interpolate.interp1d(rad, obspars['sbprof'], kind='linear', bounds_error=False, fill_value=0.0)
         sb_p0 = sbfunc(sbrad)
         sb_p0 *= sbscale/np.max(sb_p0)
         #sb_p0 *= 2.0
         #sb_p0[0] = 1.0
         #sb_p0 = np.array([1.0, 1.0, 1.0, 1.2, 1.4, 1.3, 1.2, 1.0, 0.8, 0.0])
-        sb_p0 = np.array([0.0, 0.4, 1.0, 1.0, 0.6, 0.2, 0.1, 0.05, 0.0])
+        #sb_p0 = np.array([0.3, 0.4, 1.0, 1.0, 0.6, 0.2, 0.1, 0.1, 0.1])
         debug = False
         if debug:
             sbfunc = interpolate.interp1d(sbrad, sb_p0/sbscale, kind='cubic', bounds_error=False, fill_value=0.0)
@@ -426,23 +459,23 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
     # Set some reasonable starting conditions
     if spline_sb:
         p0 = np.append(p0, sb_p0)
-        p0 = np.array([1.13588617e+00,
-        1.51205286e+02,
-        6.03590770e+00,
-        3.55056672e-02,
-        3.32754764e-02,
-        -2.48859106e-01,
-        8.00000000e-01,
-        7.69351341e-02,
-        0.050000000e+00,
-        1.30848314e-01,
-        1.00625823e-01,
-        7.04162504e-02,
-        4.54162504e-02,
-        2.70166892e-02,
-        2.04162504e-02,
-        1.20166892e-02,
-        0.00000000e+00])
+        # p0 = np.array([1.13588617e+00,
+        # 1.51205286e+02,
+        # 6.03590770e+00,
+        # 3.55056672e-02,
+        # 3.32754764e-02,
+        # -2.48859106e-01,
+        # 8.00000000e-01,
+        # 7.69351341e-02,
+        # 0.050000000e+00,
+        # 1.30848314e-01,
+        # 1.00625823e-01,
+        # 7.04162504e-02,
+        # 4.54162504e-02,
+        # 2.70166892e-02,
+        # 2.04162504e-02,
+        # 1.20166892e-02,
+        # 0.00000000e+00])
     #stpsb = sb_p0*1.0E-2*np.ones(nsurfb)
     #steps = np.append(steps, stpsb)
     # param = np.array([intflux, posang, inc, centx, centy, voffset, masscen])
@@ -466,12 +499,13 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
     #param_info[len(param)]['value'] = 1
     #param_info[-1]['fixed'] = 1
     #param_info[-1]['value'] = 0
-    #param_info[6]['fixed'] = 1
-    #param_info[6]['value'] = 0.8
+    #param_info[7]['fixed'] = 1
+    #param_info[7]['value'] = 0.8
 
     # Now tell the fitting program what we called our variables
-    err = obspars['rms'].repeat(datacut.shape[2], axis=2)
-    fa = {'sbrad': sbrad, 'rad': rad, 'fdata': datacut.flatten(), 'err': err.flatten(), 'obspars': obspars}
+    #err = obspars['rms'].repeat(datacut.shape[2], axis=2).flatten()
+    err = obspars['rms']
+    fa = {'sbrad': sbrad, 'rad': rad, 'fdata': datacut.flatten(), 'err': err, 'obspars': obspars}
 
     #######################################
     #  PERFORM THE FIT AND PRINT RESULTS
