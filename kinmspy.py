@@ -44,21 +44,27 @@ def make_model(param, obspars, rad, spi_rad=None, spl_msk=None, plotit=False):
 
     # Get the position angle profile
     ww = np.where(spl_msk == 2)
-    spfunc = interpolate.interp1d(spi_rad[1], param[ww], kind='cubic', bounds_error=False, fill_value=0.0)
-    paProf = spfunc(rad)
+    if ww[0].size == 1:
+        paProf = param[ww][0]
+    else:
+        spfunc = interpolate.interp1d(spi_rad[1], param[ww], kind='cubic', bounds_error=False, fill_value=0.0)
+        paProf = spfunc(rad)
 
     # Get the inclination angle profile
     ww = np.where(spl_msk == 3)
-    sifunc = interpolate.interp1d(spi_rad[2], param[ww], kind='cubic', bounds_error=False, fill_value=0.0)
-    incProf = sifunc(rad)
+    if ww[0].size == 1:
+        incProf = param[ww][0]
+    else:
+        sifunc = interpolate.interp1d(spi_rad[2], param[ww], kind='cubic', bounds_error=False, fill_value=0.0)
+        incProf = sifunc(rad)
 
     if plotit:
         plt.subplot(311)
-        plt.plot(rad, sbProf)
+        if spi_rad[0] is not None: plt.plot(rad, sbProf)
         plt.subplot(312)
-        plt.plot(rad, paProf)
+        if spi_rad[1] is not None: plt.plot(rad, paProf)
         plt.subplot(313)
-        plt.plot(rad, incProf)
+        if spi_rad[2] is not None: plt.plot(rad, incProf)
         plt.show()
 
     # Convert input rad [in arcsec] to radians
@@ -440,7 +446,7 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
     steps = np.array([1.0E-4, 1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4, 1.0E-4])*parscale
     p0 = param * parscale
 
-    spldict = dict(sb=True, inc=True, posang=True)
+    spldict = dict(sb=True, inc=False, posang=False)
     splmsk = np.zeros(param.size)
 
     #######################################
@@ -461,33 +467,39 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
     else:
         sbrad = None
 
-    if spldict['inc']:
-        # Include the inclination profile as a free parameter
-        sirad = np.array([0.0, 0.75, 1.50, 2.00, 3.0, 3.5, 4.25])
-        si_p0 = np.array([9.0, 10.6, 11.5, 11.4, 9.3, 8.5, 9.00])
-        nsinc = sirad.size
-        # Fill the mask and add to initial parameters
-        splmsk = np.append(splmsk, 2*np.ones(nsinc))
-        p0 = np.append(p0, si_p0)
-        priorarr = np.append(priorarr, np.repeat([[5.0, 15.0]], nsinc, axis=0), axis=0)
-        steps = np.append(steps, 0.01*np.ones(nsinc))
-    else:
-        splmsk = np.append(splmsk, 2)
-        p0 = np.append(p0, 10.0)
-        sirad = None
-
     if spldict['posang']:
         # Include the radial position angle profile as a free parameter
         sprad = np.array([0.0,   0.75,  1.50,  2.00,  3.0,   3.5,   4.25])
         sp_p0 = np.array([145.0, 140.0, 146.0, 149.0, 155.0, 157.5, 162.0])
         nspos = sprad.size
         # Fill the mask and add to initial parameters
-        splmsk = np.append(splmsk, 3*np.ones(nspos))
+        splmsk = np.append(splmsk, 2*np.ones(nspos))
         p0 = np.append(p0, sp_p0)
         priorarr = np.append(priorarr, np.repeat([[90.0, 180.0]], nspos, axis=0), axis=0)
         steps = np.append(steps, 0.1*np.ones(nspos))
     else:
+        p0 = np.append(p0, 150.0)
+        splmsk = np.append(splmsk, 2)
+        priorarr = np.append(priorarr, np.repeat([[90.0, 180.0]], 1, axis=0), axis=0)
+        steps = np.append(steps, 0.1)
         sprad = None
+
+    if spldict['inc']:
+        # Include the inclination profile as a free parameter
+        sirad = np.array([0.0, 0.75, 1.50, 2.00, 3.0, 3.5, 4.25])
+        si_p0 = np.array([9.0, 10.6, 11.5, 11.4, 9.3, 8.5, 9.00])
+        nsinc = sirad.size
+        # Fill the mask and add to initial parameters
+        splmsk = np.append(splmsk, 3*np.ones(nsinc))
+        p0 = np.append(p0, si_p0)
+        priorarr = np.append(priorarr, np.repeat([[5.0, 15.0]], nsinc, axis=0), axis=0)
+        steps = np.append(steps, 0.01*np.ones(nsinc))
+    else:
+        splmsk = np.append(splmsk, 3)
+        p0 = np.append(p0, 10.0)
+        priorarr = np.append(priorarr, np.repeat([[5.0, 15.0]], 1, axis=0), axis=0)
+        steps = np.append(steps, 0.01)
+        sirad = None
 
     # Set some constraints you would like to impose
     param_base = {'value': 0., 'fixed': 0, 'limited': [1, 1], 'limits': [0., 0.], 'step': 0.0, 'relstep': 0.001}
