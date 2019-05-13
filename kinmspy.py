@@ -29,8 +29,8 @@ def make_model(param, obspars, rad, spi_rad=None, spl_msk=None, plotit=False):
     ww = np.where(spl_msk == 0)
     param[ww] /= parscale
 
-    intflux, posang, centx, centy, voffset, masscen, gassigma =\
-        param[0], param[1], param[2], param[3], param[4], param[5], param[6]
+    intflux, centx, centy, voffset, masscen, gassigma =\
+        param[0], param[1], param[2], param[3], param[4], param[5]
 
     # Get the surface brightness profile
     if spi_rad[0] is None:
@@ -131,7 +131,7 @@ def load_file(year=2011):
         # nspat = 100
         # nspec = 70
         nspat = 75
-        nspec = 10
+        nspec = 40
         idx = (216, 197, 99)
     elif year == 2016:
         # CSv0  --  2016.1.00440.S
@@ -226,6 +226,11 @@ def prep_data_model(plotinitial=False, gencube=False):
         print("Looks good to me!")
         pdb.set_trace()
 
+    # Save some memory
+    print("saving memory")
+    dfil.close()
+    del fdata, rms, sigmap
+
     print("TODO :: Could do a better velocity interval")
     vsize = abs(velocut[-1]-velocut[0])
     dvelo = abs(velocut[velocut.size//2] - velocut[velocut.size//2 - 1])
@@ -290,7 +295,7 @@ def prep_data_model(plotinitial=False, gencube=False):
         print(key, obspars[key])
 
     # Make guesses for the parameters, and set prior ranges
-    labels = ["intflux", "posang", "inc", 'centx', 'centy', 'voffset', "masscen"]  # name of each variable, for plot
+    labels = ["intflux", 'centx', 'centy', 'voffset', "masscen", "gassigma"]  # name of each variable, for plot
     intflux = sumflux  # Best fitting total flux
     minintflux = 0.0  # lower bound total flux
     maxintflux = sumflux  # upper bound total flux
@@ -334,14 +339,10 @@ def prep_data_model(plotinitial=False, gencube=False):
     # priorarr[:, 0] = [minintflux, minposang, mininc, mincentx, mincenty, minvoffset, min_masscen, min_gassigma, min_rc, min_gamma]  # Minimum
     # priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset, max_masscen, max_gassigma, max_rc, max_gamma]  # Maximum
 
-    if gencube:
-        fsim = make_model(param, obspars, rad)
-        dathdu = fits.PrimaryHDU(fsim.T, header=dfil[0].header)
-        dathdu.writeto("gencube.fits", overwrite=True)
-    # Save some memory
-    print("saving memory")
-    dfil.close()
-    del fdata, rms, sigmap
+    # if gencube:
+    #     fsim = make_model(param, obspars, rad)
+    #     dathdu = fits.PrimaryHDU(fsim.T, header=dfil[0].header)
+    #     dathdu.writeto("gencube.fits", overwrite=True)
 
     # Show what the initial model and data look like
     if plotinitial:
@@ -446,7 +447,7 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
     steps = np.array([1.0E-4, 1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4, 1.0E-4])*parscale
     p0 = param * parscale
 
-    spldict = dict(sb=True, inc=False, posang=False)
+    spldict = dict(sb=True, inc=True, posang=True)
     splmsk = np.zeros(param.size)
 
     #######################################
@@ -522,14 +523,17 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
     fa = {'spi_rad': [sbrad, sprad, sirad], 'spl_msk':splmsk, 'rad': rad, 'fdata': datacut.flatten(), 'err': err, 'obspars': obspars}
 
     # Do a quick check to make sure the model is being interpreted correctly
-    #make_model(p0, obspars, rad, spi_rad=[sbrad, sprad, sirad], spl_msk=splmsk, plotit=True)
+    # model = make_model(p0, obspars, rad, spi_rad=[sbrad, sprad, sirad], spl_msk=splmsk, plotit=True)
+    # dathdu = fits.PrimaryHDU(model.T)
+    # dathdu.writeto("test.fits", overwrite=True)
+    #pdb.set_trace()
 
     #######################################
     #  PERFORM THE FIT AND PRINT RESULTS
     #######################################
 
     m = mpfit.mpfit(myfunct, p0, parinfo=param_info, functkw=fa, quiet=False, ncpus=4)
-    if (m.status <= 0):
+    if m.status <= 0:
         print('error message = ', m.errmsg)
     print("param: ", m.params)
     print("error: ", m.perror)
