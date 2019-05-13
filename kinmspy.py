@@ -18,28 +18,48 @@ from matplotlib import pyplot as plt
 Gcons = 6.67408e-11 * u.m**3 / u.kg / u.s**2
 dist = 59.5 * u.pc
 
-parscale = 1.0 + 0.0*np.array([10.0, 0.1, 1.0, 1.0E4, 1.0E4, 1.0E4, 1.0, 1.0])
+parscale = 1.0 + 0.0*np.array([10.0, 1.0E4, 1.0E4, 1.0E4, 1.0, 1.0])
 #parscale = 1.0 + 0.0*np.array([10.0, 0.1, 1.0, 1.0E4, 1.0E4, 1.0E4, 1.0, 1.0, 1.0, 1.0])
-sbscale = 1.0
 
 
-def make_model(param, obspars, rad, sbprof_rad=None):
+def make_model(param, obspars, rad, spi_rad=None, spl_msk=None, plotit=False):
     """rad is in arcseconds
     """
-    if sbprof_rad is None:
+    # Scale the kinms params
+    ww = np.where(spl_msk == 0)
+    param[ww] /= parscale
+
+    intflux, posang, centx, centy, voffset, masscen, gassigma =\
+        param[0], param[1], param[2], param[3], param[4], param[5], param[6]
+
+    # Get the surface brightness profile
+    if spi_rad[0] is None:
         sbProf = obspars['sbprof']
-        # rrc = rad/param[-2]
-        # sbProf = (rrc ** -param[-1]) * np.exp(-(rrc**(2.0 - param[-1])))
-        # sbProf[0] = 0.0
     else:
-        sbfunc = interpolate.interp1d(sbprof_rad, param[-sbprof_rad.size:]/sbscale, kind='cubic', bounds_error=False, fill_value=0.0)
+        ww = np.where(spl_msk == 1)
+        sbfunc = interpolate.interp1d(spi_rad[0], param[ww], kind='cubic', bounds_error=False, fill_value=0.0)
         sbProf = sbfunc(rad)
         sbProf *= 1.0/np.max(sbProf)
-        param[:8] /= parscale
         sbProf[sbProf < 0.0] = 0.0
 
-    intflux, posang, inc, centx, centy, voffset, masscen, gassigma =\
-        param[0], param[1], param[2], param[3], param[4], param[5], param[6], param[7]
+    # Get the position angle profile
+    ww = np.where(spl_msk == 2)
+    spfunc = interpolate.interp1d(spi_rad[1], param[ww], kind='cubic', bounds_error=False, fill_value=0.0)
+    paProf = spfunc(rad)
+
+    # Get the inclination angle profile
+    ww = np.where(spl_msk == 3)
+    sifunc = interpolate.interp1d(spi_rad[2], param[ww], kind='cubic', bounds_error=False, fill_value=0.0)
+    incProf = sifunc(rad)
+
+    if plotit:
+        plt.subplot(311)
+        plt.plot(rad, sbProf)
+        plt.subplot(312)
+        plt.plot(rad, paProf)
+        plt.subplot(313)
+        plt.plot(rad, incProf)
+        plt.show()
 
     # Convert input rad [in arcsec] to radians
     rpar = rad * (np.pi/180.0) / 3600.0
@@ -48,13 +68,10 @@ def make_model(param, obspars, rad, sbprof_rad=None):
     Mstar = masscen * u.Msun / dist
     vel = np.sqrt(Gcons * Mstar / rpar).to(u.km/u.s).value
 
-    # Determine the inclination as a function of radial coordinate
-    inc_rad = evaluate inclination as a function of radius
-
     # This returns the model
     return KinMS(obspars['xsize'], obspars['ysize'], obspars['vsize'], obspars['cellsize'], obspars['dv'],
-                 obspars['beamsize'], inc_rad, sbProf=sbProf, sbRad=rad, velRad=rad, velProf=vel,
-                 nSamps=obspars['nsamps'], intFlux=param[0], posAng=param[1], gasSigma=gassigma,
+                 obspars['beamsize'], incProf, sbProf=sbProf, sbRad=rad, velRad=rad, velProf=vel,
+                 nSamps=obspars['nsamps'], intFlux=intflux, posAng=paProf, gasSigma=gassigma,
                  phaseCen=[centx, centy], vOffset=voffset, fixSeed=True)
 
 
@@ -301,13 +318,13 @@ def prep_data_model(plotinitial=False, gencube=False):
     max_gamma = 5.0  # Upper range masscen
 
     # starting best guess #
-    param = np.array([intflux, posang, inc, centx, centy, voffset, masscen, gassigma])
+    param = np.array([intflux, centx, centy, voffset, masscen, gassigma])
     #param = np.array([intflux, posang, inc, centx, centy, voffset, masscen, gassigma, rc, gamma])
 
     # Setup array for priors - in this code all priors are uniform #
     priorarr = np.zeros((param.size, 2))
-    priorarr[:, 0] = [minintflux, minposang, mininc, mincentx, mincenty, minvoffset, min_masscen, min_gassigma]  # Minimum
-    priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset, max_masscen, max_gassigma]  # Maximum
+    priorarr[:, 0] = [minintflux, mincentx, mincenty, minvoffset, min_masscen, min_gassigma]  # Minimum
+    priorarr[:, 1] = [maxintflux, maxcentx, maxcenty, maxvoffset, max_masscen, max_gassigma]  # Maximum
     # priorarr[:, 0] = [minintflux, minposang, mininc, mincentx, mincenty, minvoffset, min_masscen, min_gassigma, min_rc, min_gamma]  # Minimum
     # priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset, max_masscen, max_gassigma, max_rc, max_gamma]  # Maximum
 
@@ -322,7 +339,7 @@ def prep_data_model(plotinitial=False, gencube=False):
 
     # Show what the initial model and data look like
     if plotinitial:
-        param = np.array([38.47846005, 154.1374311, 5.144372096, 0.0, 0.0, 0.0001134311081, 0.996607506, 0.2810434911])
+        param = np.array([38.47846005, 0.0, 0.0, 0.0001134311081, 0.996607506, 0.2810434911])
         fsim = make_model(param, obspars, rad)
         dathdu = fits.PrimaryHDU(fsim.T)
         dathdu.writeto("init_sim.fits", overwrite=True)
@@ -393,18 +410,22 @@ def run_mcmc(datacut, param, obspars, rad, priorarr):
     np.save("chains.npy", sampler.chain)
 
 
-def myfunct(p, fjac=None, rad=None, fdata=None, err=None, obspars=None, sbrad=None):
+def myfunct(p, fjac=None, rad=None, fdata=None, err=None, obspars=None, spi_rad=None, spl_msk=None):
     # Run make_model to produce a model cube
-    model = make_model(p, obspars, rad, sbprof_rad=sbrad)#.flatten()
-    # Force the central pixels to not contribute to the chi-squared
-    msk = np.zeros(model.shape, dtype=np.bool)
-    nsub = 10
-    xmin, xmax = model.shape[0]//2 - nsub, model.shape[0]//2 + nsub+1
-    ymin, ymax = model.shape[1]//2 - nsub, model.shape[1]//2 + nsub+1
-    msk[xmin:xmax, ymin:ymax, :] = True
-    msk = msk.flatten()
-    model = model.flatten()
-    model[msk] = fdata[msk]
+    model = make_model(p, obspars, rad, spi_rad=spi_rad, spl_msk=spl_msk)
+    mskcen = False
+    if mskcen:
+        # Force the central pixels to not contribute to the chi-squared
+        msk = np.zeros(model.shape, dtype=np.bool)
+        nsub = 10
+        xmin, xmax = model.shape[0]//2 - nsub, model.shape[0]//2 + nsub+1
+        ymin, ymax = model.shape[1]//2 - nsub, model.shape[1]//2 + nsub+1
+        msk[xmin:xmax, ymin:ymax, :] = True
+        msk = msk.flatten()
+        model = model.flatten()
+        model[msk] = fdata[msk]
+    else:
+        model = model.flatten()
 
     # Non-negative status value means MPFIT should
     # continue, negative means stop the calculation.
@@ -414,69 +435,59 @@ def myfunct(p, fjac=None, rad=None, fdata=None, err=None, obspars=None, sbrad=No
 
 def run_chisq(datacut, param, obspars, rad, priorarr):
     # Start with a better guess of the disk parameters
-    param = np.array([1.145, 151.189245, 6.969, 0.035626, 0.0344, 0.1513, 0.8, 0.0764])
-    steps = np.array([1.0E-4, 0.1, 0.1, 1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4, 1.0E-4])*parscale
+
+    param = np.array([1.145, 0.035626, 0.0344, 0.1513, 0.8, 0.0764])
+    steps = np.array([1.0E-4, 1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4, 1.0E-4])*parscale
     p0 = param * parscale
 
-    spline_sb = True
+    spldict = dict(sb=True, inc=True, posang=True)
+    splmsk = np.zeros(param.size)
+
     #######################################
     #          PREPARE THE FIT
     #######################################
-    if spline_sb:
+    if spldict['sb']:
         # Include the radial surface brightness profile as a free parameter
-        nsurfb = 20
-        #sbradAU = (np.linspace(0.0, 11.0, nsurfb)**2)*u.AU
-        #sbradAU = np.array([0.0, 8.0, 25.0, 50.0, 80.0, 110.0]) * u.AU
-        #sbrad = (sbradAU/dist).to(u.pc/u.pc).value  # in radians
-        #sbrad *= 3600.0 * (180.0/np.pi)
-        #sbrad = np.arange(0.0, 2.1, 0.4)
-        #sbrad = np.array([0.0, 0.4, 0.8, 1.2, 1.4, 1.6, 1.8, 2.4, 3.0])
+        nsurfb = 10
         sbrad = np.linspace(0.0, np.sqrt(4.25), nsurfb)**2
         sbfunc = interpolate.interp1d(rad, obspars['sbprof'], kind='linear', bounds_error=False, fill_value=0.0)
         sb_p0 = sbfunc(sbrad)
-        sb_p0 *= sbscale/np.max(sb_p0)
-        #sb_p0 *= 2.0
-        #sb_p0[0] = 1.0
-        #sb_p0 = np.array([1.0, 1.0, 1.0, 1.2, 1.4, 1.3, 1.2, 1.0, 0.8, 0.0])
-        #sb_p0 = np.array([0.3, 0.4, 1.0, 1.0, 0.6, 0.2, 0.1, 0.1, 0.1])
-        debug = False
-        if debug:
-            sbfunc = interpolate.interp1d(sbrad, sb_p0/sbscale, kind='cubic', bounds_error=False, fill_value=0.0)
-            sbfunclin = interpolate.interp1d(sbrad, sb_p0/sbscale, kind='linear', bounds_error=False, fill_value=0.0)
-            sbProf = sbfunc(rad) / sbfunc(0.0)
-            sbProf_lin = sbfunclin(rad) / sbfunclin(0.0)
-            pdb.set_trace()
-            from matplotlib import pyplot as plt
-            plt.plot(rad, sbProf, 'b-')
-            plt.plot(rad, sbProf_lin, 'g-')
-            plt.plot(sbrad, sb_p0/sbscale, 'ro')
-            plt.show()
+        sb_p0 *= 1.0/np.max(sb_p0)
+        # Fill the mask and add to initial parameters
+        splmsk = np.append(splmsk, 1*np.ones(nsurfb))
+        p0 = np.append(p0, sb_p0)
+        priorarr = np.append(priorarr, np.repeat([[0.0, 1.0]], nsurfb, axis=0), axis=0)
+        steps = np.append(steps, np.zeros(nsurfb))
     else:
         sbrad = None
 
-    # Set some reasonable starting conditions
-    if spline_sb:
-        p0 = np.append(p0, sb_p0)
-        # p0 = np.array([1.13588617e+00,
-        # 1.51205286e+02,
-        # 6.03590770e+00,
-        # 3.55056672e-02,
-        # 3.32754764e-02,
-        # -2.48859106e-01,
-        # 8.00000000e-01,
-        # 7.69351341e-02,
-        # 0.050000000e+00,
-        # 1.30848314e-01,
-        # 1.00625823e-01,
-        # 7.04162504e-02,
-        # 4.54162504e-02,
-        # 2.70166892e-02,
-        # 2.04162504e-02,
-        # 1.20166892e-02,
-        # 0.00000000e+00])
-    #stpsb = sb_p0*1.0E-2*np.ones(nsurfb)
-    #steps = np.append(steps, stpsb)
-    # param = np.array([intflux, posang, inc, centx, centy, voffset, masscen])
+    if spldict['inc']:
+        # Include the inclination profile as a free parameter
+        sirad = np.array([0.0, 0.75, 1.50, 2.00, 3.0, 3.5, 4.25])
+        si_p0 = np.array([9.0, 10.6, 11.5, 11.4, 9.3, 8.5, 9.00])
+        nsinc = sirad.size
+        # Fill the mask and add to initial parameters
+        splmsk = np.append(splmsk, 2*np.ones(nsinc))
+        p0 = np.append(p0, si_p0)
+        priorarr = np.append(priorarr, np.repeat([[5.0, 15.0]], nsinc, axis=0), axis=0)
+        steps = np.append(steps, 0.01*np.ones(nsinc))
+    else:
+        splmsk = np.append(splmsk, 2)
+        p0 = np.append(p0, 10.0)
+        sirad = None
+
+    if spldict['posang']:
+        # Include the radial position angle profile as a free parameter
+        sprad = np.array([0.0,   0.75,  1.50,  2.00,  3.0,   3.5,   4.25])
+        sp_p0 = np.array([145.0, 140.0, 146.0, 149.0, 155.0, 157.5, 162.0])
+        nspos = sprad.size
+        # Fill the mask and add to initial parameters
+        splmsk = np.append(splmsk, 3*np.ones(nspos))
+        p0 = np.append(p0, sp_p0)
+        priorarr = np.append(priorarr, np.repeat([[90.0, 180.0]], nspos, axis=0), axis=0)
+        steps = np.append(steps, 0.1*np.ones(nspos))
+    else:
+        sprad = None
 
     # Set some constraints you would like to impose
     param_base = {'value': 0., 'fixed': 0, 'limited': [1, 1], 'limits': [0., 0.], 'step': 0.0, 'relstep': 0.001}
@@ -488,22 +499,18 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
         param_info[i]['value'] = p0[i]
         if i < len(param):
             param_info[i]['limits'] = [priorarr[i, 0]*parscale[i], priorarr[i, 1]*parscale[i]]
-            #param_info[i]['fixed'] = 1
             param_info[i]['step'] = steps[i]
         else:
-            param_info[i]['limits'] = [0.0, sbscale]
-    # Force the inner value of the surface brightness profile to be 1
-    #param_info[len(param)]['fixed'] = 1
-    #param_info[len(param)]['value'] = 1
-    #param_info[-1]['fixed'] = 1
-    #param_info[-1]['value'] = 0
-    #param_info[7]['fixed'] = 1
-    #param_info[7]['value'] = 0.8
+            param_info[i]['limits'] = [priorarr[i, 0], priorarr[i, 1]]
+            param_info[i]['step'] = steps[i]
 
     # Now tell the fitting program what we called our variables
     #err = obspars['rms'].repeat(datacut.shape[2], axis=2).flatten()
     err = obspars['rms']
-    fa = {'sbrad': sbrad, 'rad': rad, 'fdata': datacut.flatten(), 'err': err, 'obspars': obspars}
+    fa = {'spi_rad': [sbrad, sprad, sirad], 'spl_msk':splmsk, 'rad': rad, 'fdata': datacut.flatten(), 'err': err, 'obspars': obspars}
+
+    # Do a quick check to make sure the model is being interpreted correctly
+    #make_model(p0, obspars, rad, spi_rad=[sbrad, sprad, sirad], spl_msk=splmsk, plotit=True)
 
     #######################################
     #  PERFORM THE FIT AND PRINT RESULTS
