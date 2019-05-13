@@ -18,7 +18,7 @@ from matplotlib import pyplot as plt
 Gcons = 6.67408e-11 * u.m**3 / u.kg / u.s**2
 dist = 59.5 * u.pc
 
-parscale = 1.0 + 0.0*np.array([10.0, 0.1, 1.0, 1.0, 1.0E4, 1.0E4, 1.0E4, 1.0, 1.0])
+parscale = 1.0 + 0.0*np.array([10.0, 0.1, 1.0, 1.0E4, 1.0E4, 1.0E4, 1.0, 1.0])
 #parscale = 1.0 + 0.0*np.array([10.0, 0.1, 1.0, 1.0E4, 1.0E4, 1.0E4, 1.0, 1.0, 1.0, 1.0])
 sbscale = 1.0
 
@@ -35,11 +35,11 @@ def make_model(param, obspars, rad, sbprof_rad=None):
         sbfunc = interpolate.interp1d(sbprof_rad, param[-sbprof_rad.size:]/sbscale, kind='cubic', bounds_error=False, fill_value=0.0)
         sbProf = sbfunc(rad)
         sbProf *= 1.0/np.max(sbProf)
-        param[:9] /= parscale
+        param[:8] /= parscale
         sbProf[sbProf < 0.0] = 0.0
 
-    intflux, posang, inc, incout, centx, centy, voffset, masscen, gassigma =\
-        param[0], param[1], param[2], param[3], param[4], param[5], param[6], param[7], param[8]
+    intflux, posang, inc, centx, centy, voffset, masscen, gassigma =\
+        param[0], param[1], param[2], param[3], param[4], param[5], param[6], param[7]
 
     # Convert input rad [in arcsec] to radians
     rpar = rad * (np.pi/180.0) / 3600.0
@@ -49,7 +49,7 @@ def make_model(param, obspars, rad, sbprof_rad=None):
     vel = np.sqrt(Gcons * Mstar / rpar).to(u.km/u.s).value
 
     # Determine the inclination as a function of radial coordinate
-    inc_rad = np.linspace(inc, incout, rad.size)
+    inc_rad = evaluate inclination as a function of radius
 
     # This returns the model
     return KinMS(obspars['xsize'], obspars['ysize'], obspars['vsize'], obspars['cellsize'], obspars['dv'],
@@ -120,7 +120,7 @@ def load_file(year=2011):
     return fname, freq0, nspat, nspec, idx
 
 
-def prep_data_model(plotinitial=False):
+def prep_data_model(plotinitial=False, gencube=False):
     # Load in the observational data
     print("Load data -- Is it correct to transpose?")
     dir = "/Users/rcooke/Work/Research/Cosmo/SandageTest/ALMA/data/TWHya/"
@@ -215,11 +215,6 @@ def prep_data_model(plotinitial=False):
     psf = makebeam(xsize, ysize, [bmaj/cellsize, bmin/cellsize], rot=bpa)
     sumflux = np.sum(datacut)*dvelo/psf.sum()
 
-    # Save some memory
-    print("saving memory")
-    dfil.close()
-    del fdata, rms, sigmap
-
     # Setup a radius vector [arcseconds]
     radsamp = 10000
     rad = np.linspace(0., xsize/1.414, radsamp)
@@ -242,9 +237,8 @@ def prep_data_model(plotinitial=False):
     obspars['cellsize'] = cellsize  # arcseconds/pixel
     obspars['dv'] = dvelo  # km/s/channel
     obspars['beamsize'] = np.array([bmaj, bmin, bpa])  # (arcsec, arcsec, degrees)
-    obspars['nsamps'] = 2e6  # Number of cloudlets to use for KinMS models
-    #obspars['rms'] = rmscut  # RMS of data
-    obspars['rms'] = np.median(rmscut)  # RMS of data
+    obspars['nsamps'] = 5e5  # Number of cloudlets to use for KinMS models
+    obspars['rms'] = rmscut  # RMS of data
     obspars['sbprof'] = sb_profile  # Surface brightness profile
     obspars['velocut0'] = velocut[0]
 
@@ -283,9 +277,6 @@ def prep_data_model(plotinitial=False):
     inc = 10.  # degrees
     mininc = 5.0  # Min inc
     maxinc = 15.0  # Max inc
-    incout = 10.  # degrees
-    minincout = 5.0  # Min inc
-    maxincout = 15.0  # Max inc
     centx = 0.0  # Best fit x-pos for kinematic centre
     mincentx = -5.0  # min cent x
     maxcentx = 5.0  # max cent x
@@ -298,9 +289,9 @@ def prep_data_model(plotinitial=False):
     masscen = 0.8  # masscen
     min_masscen = 0.6  # Lower range masscen
     max_masscen = 1.0  # Upper range masscen
-    gassigma = 0.35  # masscen
-    min_gassigma = 0.0  # Lower range masscen
-    max_gassigma = 2.0  # Upper range masscen
+    gassigma = 0.2  # gas velocity dispersion
+    min_gassigma = 0.0  # Lower range velocity dispersion
+    max_gassigma = 2.0  # Upper range velocity dispersion
 
     rc = 1.0  # arcsec
     min_rc = 0.2  # Lower range masscen
@@ -310,15 +301,24 @@ def prep_data_model(plotinitial=False):
     max_gamma = 5.0  # Upper range masscen
 
     # starting best guess #
-    param = np.array([intflux, posang, inc, incout, centx, centy, voffset, masscen, gassigma])
+    param = np.array([intflux, posang, inc, centx, centy, voffset, masscen, gassigma])
     #param = np.array([intflux, posang, inc, centx, centy, voffset, masscen, gassigma, rc, gamma])
 
     # Setup array for priors - in this code all priors are uniform #
     priorarr = np.zeros((param.size, 2))
-    priorarr[:, 0] = [minintflux, minposang, mininc, minincout, mincentx, mincenty, minvoffset, min_masscen, min_gassigma]  # Minimum
-    priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxincout, maxcentx, maxcenty, maxvoffset, max_masscen, max_gassigma]  # Maximum
+    priorarr[:, 0] = [minintflux, minposang, mininc, mincentx, mincenty, minvoffset, min_masscen, min_gassigma]  # Minimum
+    priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset, max_masscen, max_gassigma]  # Maximum
     # priorarr[:, 0] = [minintflux, minposang, mininc, mincentx, mincenty, minvoffset, min_masscen, min_gassigma, min_rc, min_gamma]  # Minimum
     # priorarr[:, 1] = [maxintflux, maxposang, maxinc, maxcentx, maxcenty, maxvoffset, max_masscen, max_gassigma, max_rc, max_gamma]  # Maximum
+
+    if gencube:
+        fsim = make_model(param, obspars, rad)
+        dathdu = fits.PrimaryHDU(fsim.T, header=dfil[0].header)
+        dathdu.writeto("gencube.fits", overwrite=True)
+    # Save some memory
+    print("saving memory")
+    dfil.close()
+    del fdata, rms, sigmap
 
     # Show what the initial model and data look like
     if plotinitial:
@@ -414,10 +414,8 @@ def myfunct(p, fjac=None, rad=None, fdata=None, err=None, obspars=None, sbrad=No
 
 def run_chisq(datacut, param, obspars, rad, priorarr):
     # Start with a better guess of the disk parameters
-    #param = np.array([1.145, 151.189245, 6.969, 0.035626, 0.0344, 0.1513, 0.8, 0.0764])
-    #param = np.array([1.145, 151.189245, 6.969, 0.035626, 0.0344, 0.1513, 0.8, 0.3])
-    param = np.array([21.27846005, 146.7374311, 9.144372096, 9.644372096, -0.015626, 0.0544, 0.005134311081, 0.848, 0.3310434911])
-    steps = np.array([1.0E-4, 0.01, 0.01, 0.01, 1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4, 1.0E-4])*parscale
+    param = np.array([1.145, 151.189245, 6.969, 0.035626, 0.0344, 0.1513, 0.8, 0.0764])
+    steps = np.array([1.0E-4, 0.1, 0.1, 1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4, 1.0E-4])*parscale
     p0 = param * parscale
 
     spline_sb = True
@@ -547,8 +545,9 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
 if __name__ == "__main__":
     mcmc = False
     chisq = True
+    gencube = False
     print("Preparing data...")
-    datacut, param, obspars, rad, priorarr = prep_data_model()
+    datacut, param, obspars, rad, priorarr = prep_data_model(gencube=gencube)
     print("complete")
     if mcmc:
         print("Running MCMC")
