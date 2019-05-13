@@ -521,7 +521,7 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
         print('error message = ', m.errmsg)
     print("param: ", m.params)
     print("error: ", m.perror)
-    fsim = make_model(m.params, obspars, rad, sbprof_rad=sbrad)
+    fsim = make_model(m.params, obspars, rad, spi_rad=[sbrad, sprad, sirad], spl_msk=splmsk, plotit=True)
     dathdu = fits.PrimaryHDU(fsim.T)
     dathdu.writeto("test.fits", overwrite=True)
     dathdu = fits.PrimaryHDU(datacut.T)
@@ -530,21 +530,17 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
     dathdu.writeto("test_diff.fits", overwrite=True)
     dathdu = fits.PrimaryHDU(((fsim - datacut) / err).T)
     dathdu.writeto("test_resid.fits", overwrite=True)
-    sbfunc = interpolate.interp1d(sbrad, m.params[-sbrad.size:] / sbscale, kind='cubic', bounds_error=False, fill_value=0.0)
-    sbProf = sbfunc(rad)
-    sbProf *= 1.0 / np.max(sbProf)
-    sbProf[sbProf < 0.0] = 0.0
-    from matplotlib import pyplot as plt
-    plt.subplot(211)
-    plt.plot(rad, sbProf, 'k-')
-    # convert rad to radAU
-    plt.subplot(212)
-    radAU = (dist * rad / (3600.0 * (180.0/np.pi))).to(u.AU)
-    plt.plot(radAU.value, sbProf, 'k-')
-    plt.show()
+    if False:
+        plt.subplot(211)
+        plt.plot(rad, sbProf, 'k-')
+        # convert rad to radAU
+        plt.subplot(212)
+        radAU = (dist * rad / (3600.0 * (180.0/np.pi))).to(u.AU)
+        plt.plot(radAU.value, sbProf, 'k-')
+        plt.show()
     pdb.set_trace()
     vSize = obspars['vsize']
-    vshft = (vSize / 2.) + m.params[5]
+    vshft = (vSize / 2.) + m.params[3]
     vlos = obspars['velocut0'] - vshft
     return
 
