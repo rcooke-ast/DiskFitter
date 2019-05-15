@@ -276,7 +276,7 @@ def prep_data_model(plotinitial=False, gencube=False):
     labels = ["intflux", 'posang', 'inc', 'centx', 'centy', 'voffset', "masscen", "gassigma"]  # name of each variable, for plot
     intflux = sumflux  # Best fitting total flux
     minintflux = 0.0  # lower bound total flux
-    maxintflux = sumflux  # upper bound total flux
+    maxintflux = 10*sumflux  # upper bound total flux
     posang = 150.  # Best fit posang.
     minposang = 90.  # Min posang.
     maxposang = 180.  # Max posang.
@@ -413,11 +413,13 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         rings = np.linspace(0.0, 3.0, 20)
 
     # Start with a better guess of the disk parameters
+    param = np.array([432.798918, 150.0, 7.214971093, -0.09105279131, -0.02010872831, 0.1535637512, 0.7791708363, 0.07906237252])
+    #param = np.array([1.145, 151.189245, 6.969, 0.035626, 0.0344, 0.1513, 0.8, 0.0764])
     steps = np.array([1.0E-3, 1.0E-1, 1.0E-1, 1.0E-4, 1.0E-4, 1.0E-4, 1.0e-3, 1.0E-3, 0.01])
-    p0 = np.append(param, 1.0)  # Add a zero on for the surface brightness profile
+    p0 = np.append(param, 0.8)  # Add a zero on for the surface brightness profile
 
     # Set some constraints you would like to impose
-    param_base = {'value': 0., 'fixed': 0, 'limited': [1, 1], 'limits': [0., 0.], 'step': 0.0, 'relstep': 0.001}
+    param_base = {'value': 0., 'fixed': 0, 'limited': [1, 1], 'limits': [0., 0.], 'step': 0.0, 'relstep': 0.01}
 
     # Make a copy of this 'base' for all of our parameters, and set starting parameters
     param_info = []
@@ -428,7 +430,7 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
             param_info[i]['limits'] = [priorarr[i, 0], priorarr[i, 1]]
         else:
             param_info[i]['limits'] = [-100, 100]
-        #param_info[i]['step'] = steps[i]
+        param_info[i]['step'] = steps[i]
 
     # Set the errors
     #err = obspars['rms'].repeat(datacut.shape[2], axis=2).flatten()
@@ -437,6 +439,10 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
     outvals = np.zeros((p0.size, rings.size-1))
     outerrs = np.zeros((p0.size, rings.size-1))
     for rr in range(rings.size-1):
+        # Restart from the previous best parameters
+        if rr != 0:
+            for i in range(len(p0)):
+                param_info[i]['value'] = m.params[i]
         # Set the ring properties
         ring = [rings[rr], rings[rr+1]-rings[rr]]
 
@@ -592,3 +598,10 @@ if __name__ == "__main__":
         outvals, outerrs = run_chisq(datacut, param, obspars, rad, priorarr)
         np.save("outvals", outvals)
         np.save("outerrs", outerrs)
+        rings = np.linspace(0.0, 3.0, 20)
+        for ii in range(outvals.shape[0]):
+            plt.subplot(3, 3, ii)
+            plt.plot(rings[:-1], outvals[ii, :], marker='o', color='b')
+            plt.errorbar(rings[:-1], outvals[ii, :], outerrs[ii, :], fmt=None, color='b')
+            #plt.errorbar(rings[:-1], outvals[ii, :], outerrs[ii, :], fmt='')
+        plt.show()
