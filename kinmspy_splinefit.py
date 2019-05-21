@@ -520,12 +520,12 @@ def run_chisq(datacut, param, obspars, rad, priorarr):
         # Fill the mask and add to initial parameters
         splmsk = np.append(splmsk, 4*np.ones(nssig))
         p0 = np.append(p0, sg_p0)
-        priorarr = np.append(priorarr, np.repeat([[0.5, 0.3]], nssig, axis=0), axis=0)
+        priorarr = np.append(priorarr, np.repeat([[0.05, 0.3]], nssig, axis=0), axis=0)
         steps = np.append(steps, 0.01*np.ones(nssig))
     else:
         splmsk = np.append(splmsk, 4)
         p0 = np.append(p0, 0.2)
-        priorarr = np.append(priorarr, np.repeat([[0.5, 0.3]], 1, axis=0), axis=0)
+        priorarr = np.append(priorarr, np.repeat([[0.05, 0.3]], 1, axis=0), axis=0)
         steps = np.append(steps, 0.001)
         sgrad = None
 
