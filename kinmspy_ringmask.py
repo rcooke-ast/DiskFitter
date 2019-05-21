@@ -416,7 +416,7 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
     param = np.array([432.798918, 150.0, 7.214971093, -0.09105279131, -0.02010872831, 0.1535637512, 0.7791708363, 0.07906237252])
     #param = np.array([1.145, 151.189245, 6.969, 0.035626, 0.0344, 0.1513, 0.8, 0.0764])
     steps = np.array([1.0E-3, 1.0E-1, 1.0E-1, 1.0E-4, 1.0E-4, 1.0E-4, 1.0e-3, 1.0E-3, 0.01])
-    p0 = np.append(param, 0.8)  # Add a zero on for the surface brightness profile
+    p0 = np.append(param, 0.8)  # Add another parameter which represents the gradient of the surface brightness profile
 
     # Set some constraints you would like to impose
     param_base = {'value': 0., 'fixed': 0, 'limited': [1, 1], 'limits': [0., 0.], 'step': 0.0, 'relstep': 0.01}
@@ -468,7 +468,7 @@ def run_chisq_spi_fixed(datacut, param, obspars, rad, priorarr):
     steps = np.array([1.0E-4, 1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4, 1.0E-4])*parscale
     p0 = param * parscale
 
-    spldict = dict(sb=True, inc=True, posang=True)
+    spldict = dict(sb=True, inc=True, posang=True, gassig=True)
     splmsk = np.zeros(param.size)
 
     #######################################
@@ -477,9 +477,12 @@ def run_chisq_spi_fixed(datacut, param, obspars, rad, priorarr):
     if spldict['sb']:
         # Include the radial surface brightness profile as a free parameter
         nsurfb = 10
-        sbrad = np.linspace(0.0, np.sqrt(4.25), nsurfb)**2
-        sbfunc = interpolate.interp1d(rad, obspars['sbprof'], kind='linear', bounds_error=False, fill_value=0.0)
-        sb_p0 = sbfunc(sbrad)
+        sbrad = np.array(
+            [0.0, 0.15789474, 0.31578947, 0.47368421, 0.63157895, 0.78947368, 0.94736842, 1.10526316, 1.26315789,
+             1.57894737, 1.89473684, 2.21052632, 2.52631579, 2.84210526])
+        sb_p0 = np.array(
+            [454.12234286, 393.36149741, 286.80762835, 216.90814331, 207.93973294, 161.50987764, 140.72118948,
+             117.95176048, 98.90525955, 68.81306633, 48.03526046, 32.32684097, 21.07468516, 14.83180197])
         sb_p0 *= 1.0/np.max(sb_p0)
         # Fill the mask and add to initial parameters
         splmsk = np.append(splmsk, 1*np.ones(nsurfb))
@@ -491,8 +494,8 @@ def run_chisq_spi_fixed(datacut, param, obspars, rad, priorarr):
 
     if spldict['posang']:
         # Include the radial position angle profile as a free parameter
-        sprad = np.array([0.0,   0.75,  1.50,  2.00,  3.0,   3.5,   4.25])
-        sp_p0 = np.array([145.0, 140.0, 146.0, 149.0, 155.0, 157.5, 162.0])
+        sprad = np.array([0.0, 0.15, 0.3, 0.5, 0.8, 1.15, 1.6, 2.0, 3.0])
+        sp_p0 = np.array([172, 160.0, 154.8, 155.4, 152.7, 153.3, 152.5, 152.2, 151.5])
         nspos = sprad.size
         # Fill the mask and add to initial parameters
         splmsk = np.append(splmsk, 2*np.ones(nspos))
@@ -508,8 +511,8 @@ def run_chisq_spi_fixed(datacut, param, obspars, rad, priorarr):
 
     if spldict['inc']:
         # Include the inclination profile as a free parameter
-        sirad = np.array([0.0, 0.75, 1.50, 2.00, 3.0, 3.5, 4.25])
-        si_p0 = np.array([9.0, 10.6, 11.5, 11.4, 9.3, 8.5, 9.00])
+        sirad = np.array([0.0, 0.25, 0.50, 1.0, 2.0, 3.0])
+        si_p0 = np.array([7.35403098, 7.63412163, 7.70179149, 7.35666027, 5.84205372, 5.11887352])
         nsinc = sirad.size
         # Fill the mask and add to initial parameters
         splmsk = np.append(splmsk, 3*np.ones(nsinc))
@@ -522,6 +525,23 @@ def run_chisq_spi_fixed(datacut, param, obspars, rad, priorarr):
         priorarr = np.append(priorarr, np.repeat([[5.0, 15.0]], 1, axis=0), axis=0)
         steps = np.append(steps, 0.01)
         sirad = None
+
+    if spldict['gassig']:
+        # Include the inclination profile as a free parameter
+        sgrad = np.array([0.0, 0.15, 0.3, 0.5, 0.650, 1.0, 2.0, 3.0])
+        sg_p0 = np.array([0.078, 0.078, 0.085, 0.13, 0.223, 0.22, 0.17, 0.14])
+        nssig = sgrad.size
+        # Fill the mask and add to initial parameters
+        splmsk = np.append(splmsk, 4*np.ones(nssig))
+        p0 = np.append(p0, sg_p0)
+        priorarr = np.append(priorarr, np.repeat([[0.5, 0.3]], nssig, axis=0), axis=0)
+        steps = np.append(steps, 0.01*np.ones(nssig))
+    else:
+        splmsk = np.append(splmsk, 4)
+        p0 = np.append(p0, 0.2)
+        priorarr = np.append(priorarr, np.repeat([[0.5, 0.3]], 1, axis=0), axis=0)
+        steps = np.append(steps, 0.001)
+        sgrad = None
 
     # Set some constraints you would like to impose
     param_base = {'value': 0., 'fixed': 0, 'limited': [1, 1], 'limits': [0., 0.], 'step': 0.0, 'relstep': 0.001}
@@ -541,12 +561,12 @@ def run_chisq_spi_fixed(datacut, param, obspars, rad, priorarr):
     # Now tell the fitting program what we called our variables
     #err = obspars['rms'].repeat(datacut.shape[2], axis=2).flatten()
     err = np.mean(obspars['rms'])#.flatten()
-    fa = {'spi_rad': [sbrad, sprad, sirad], 'spl_msk':splmsk, 'rad': rad, 'fdata': datacut.flatten(), 'err': err, 'obspars': obspars}
+    fa = {'spi_rad': [sbrad, sprad, sirad, sgrad], 'spl_msk':splmsk, 'rad': rad, 'fdata': datacut.flatten(), 'err': err, 'obspars': obspars}
 
     # Do a quick check to make sure the model is being interpreted correctly
     plotinitial = False
     if plotinitial:
-        model = make_model(p0, obspars, rad, spi_rad=[sbrad, sprad, sirad], spl_msk=splmsk, plotit=True)
+        model = make_model(p0, obspars, rad, spi_rad=[sbrad, sprad, sirad, sgrad], spl_msk=splmsk, plotit=True)
         dathdu = fits.PrimaryHDU(model.T)
         dathdu.writeto("test.fits", overwrite=True)
 
@@ -595,13 +615,18 @@ if __name__ == "__main__":
         run_mcmc(datacut, param, obspars, rad, priorarr)
     if chisq:
         print("Running chi-squared minimization")
-        outvals, outerrs = run_chisq(datacut, param, obspars, rad, priorarr)
-        np.save("outvals", outvals)
-        np.save("outerrs", outerrs)
+        fitit = False
+        if fitit:
+            outvals, outerrs = run_chisq(datacut, param, obspars, rad, priorarr)
+            np.save("outvals", outvals)
+            np.save("outerrs", outerrs)
+        else:
+            outvals = np.load("outvals.npy")
+            outerrs = np.load("outerrs.npy")
         rings = np.linspace(0.0, 3.0, 20)
         for ii in range(outvals.shape[0]):
-            plt.subplot(3, 3, ii)
+            plt.subplot(3, 3, ii+1)
             plt.plot(rings[:-1], outvals[ii, :], marker='o', color='b')
-            plt.errorbar(rings[:-1], outvals[ii, :], outerrs[ii, :], fmt=None, color='b')
+            plt.errorbar(rings[:-1], outvals[ii, :], outerrs[ii, :], fmt='none', color='b')
             #plt.errorbar(rings[:-1], outvals[ii, :], outerrs[ii, :], fmt='')
         plt.show()
