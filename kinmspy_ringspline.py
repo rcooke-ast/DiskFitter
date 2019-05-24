@@ -50,7 +50,7 @@ def make_model(param, obspars, rad, spi_rad=None, spl_msk=None, plotit=False, ri
     if ww[0].size == 1:
         paProf = param[ww][0]
     else:
-        spfunc = interpolate.interp1d(spi_rad[1], param[ww], kind='linear', bounds_error=False, fill_value='extrapolate')
+        spfunc = interpolate.interp1d(spi_rad[1], param[ww], kind='cubic', bounds_error=False, fill_value='extrapolate')
         paProf = spfunc(rad)
 
     # Get the inclination angle profile
@@ -58,7 +58,7 @@ def make_model(param, obspars, rad, spi_rad=None, spl_msk=None, plotit=False, ri
     if ww[0].size == 1:
         incProf = param[ww][0]
     else:
-        sifunc = interpolate.interp1d(spi_rad[2], param[ww], kind='linear', bounds_error=False, fill_value='extrapolate')
+        sifunc = interpolate.interp1d(spi_rad[2], param[ww], kind='cubic', bounds_error=False, fill_value='extrapolate')
         incProf = sifunc(rad)
 
     # Get the gas sigma profile
@@ -343,8 +343,8 @@ def prep_data_model(plotinitial=False, gencube=False):
     minvoffset = -vsize/2  # min velocity centroid
     maxvoffset = +vsize/2  # max velocity centroid
     masscen = 0.8  # masscen
-    min_masscen = 0.6  # Lower range masscen
-    max_masscen = 1.0  # Upper range masscen
+    min_masscen = 0.75  # Lower range masscen
+    max_masscen = 0.85  # Upper range masscen
 
     # starting best guess #
     param = np.array([intflux, centx, centy, voffset, masscen])
@@ -449,33 +449,27 @@ def myfunct(p, fjac=None, rad=None, fdata=None, err=None, obspars=None, spi_rad=
     return [status, (fdata-chisq_model)/err]
 
 
-def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
-    if rings is None:
-        rings = np.linspace(0.0, 3.0, 20)
-
+def run_chisq(datacut, param, obspars, rad, priorarr):
     # Start with a better guess of the disk parameters
+
     param = np.array([28.0, -0.01216, -0.02932, 0.07400, 0.8])
     steps = np.array([1.0E-4, 1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4])*parscale
     p0 = param * parscale
 
     spldict = dict(sb=True, inc=True, posang=True, gassig=True)
     splmsk = np.zeros(param.size)
-    outvals = np.load("outvals.npy")
 
     #######################################
     #          PREPARE THE FIT
     #######################################
     if spldict['sb']:
         # Include the radial surface brightness profile as a free parameter
-        sbrad = rings[1:-1]
-        sbrad = np.append([0.0, sbrad[0]/2.], sbrad)
-        sb_p0 = np.append(outvals[0, 0]/2, outvals[0, :])
-        # sbrad = np.array(
-        #     [0.0, 0.15789474, 0.31578947, 0.47368421, 0.63157895, 0.78947368, 0.94736842, 1.10526316, 1.26315789,
-        #      1.57894737, 1.89473684, 2.21052632, 2.52631579, 2.84210526])
-        # sb_p0 = np.array(
-        #     [454.12234286, 393.36149741, 286.80762835, 216.90814331, 207.93973294, 161.50987764, 140.72118948,
-        #      117.95176048, 98.90525955, 68.81306633, 48.03526046, 32.32684097, 21.07468516, 14.83180197])
+        sbrad = np.array(
+            [0.0, 0.15789474, 0.31578947, 0.47368421, 0.63157895, 0.78947368, 0.94736842, 1.10526316, 1.26315789,
+             1.57894737, 1.89473684, 2.21052632, 2.52631579, 2.84210526])
+        sb_p0 = np.array(
+            [454.12234286, 393.36149741, 286.80762835, 216.90814331, 207.93973294, 161.50987764, 140.72118948,
+             117.95176048, 98.90525955, 68.81306633, 48.03526046, 32.32684097, 21.07468516, 14.83180197])
         nsurfb = sbrad.size
         sb_p0 *= 1.0/np.max(sb_p0)
         # Fill the mask and add to initial parameters
@@ -489,15 +483,13 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
 
     if spldict['posang']:
         # Include the radial position angle profile as a free parameter
-        sprad = rings[:-1]
-        sp_p0 = outvals[1, :]
-        # sprad = np.array([0.0, 0.15, 0.3, 0.5, 0.8, 1.15, 1.6, 2.0, 3.0])
-        # sp_p0 = np.array([172, 160.0, 154.8, 155.4, 152.7, 153.3, 152.5, 152.2, 151.5])
+        sprad = np.array([0.0, 0.15, 0.3, 0.5, 0.8, 1.15, 1.6, 2.0, 3.0])
+        sp_p0 = np.array([172, 160.0, 154.8, 155.4, 152.7, 153.3, 152.5, 152.2, 151.5])
         nspos = sprad.size
         # Fill the mask and add to initial parameters
         splmsk = np.append(splmsk, 2*np.ones(nspos))
         p0 = np.append(p0, sp_p0)
-        priorarr = np.append(priorarr, np.repeat([[90.0, 250.0]], nspos, axis=0), axis=0)
+        priorarr = np.append(priorarr, np.repeat([[90.0, 180.0]], nspos, axis=0), axis=0)
         #steps = np.append(steps, 0.1*np.ones(nspos))
         steps = np.append(steps, np.zeros(nspos))
     else:
@@ -509,10 +501,8 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
 
     if spldict['inc']:
         # Include the inclination profile as a free parameter
-        sirad = rings[:-1]
-        si_p0 = outvals[2, :]
-        # sirad = np.array([0.0, 0.25, 0.50, 1.0, 2.0, 3.0])
-        # si_p0 = np.array([7.35403098, 7.63412163, 7.70179149, 7.35666027, 5.84205372, 5.11887352])
+        sirad = np.array([0.0, 0.25, 0.50, 1.0, 2.0, 3.0])
+        si_p0 = np.array([7.35403098, 7.63412163, 7.70179149, 7.35666027, 5.84205372, 5.11887352])
         nsinc = sirad.size
         # Fill the mask and add to initial parameters
         splmsk = np.append(splmsk, 3*np.ones(nsinc))
@@ -529,10 +519,8 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
 
     if spldict['gassig']:
         # Include the inclination profile as a free parameter
-        sgrad = rings[:-1]
-        sg_p0 = outvals[7, :]
-        # sgrad = np.array([0.0, 0.15, 0.3, 0.5, 0.650, 1.0, 2.0, 3.0])
-        # sg_p0 = np.array([0.078, 0.080, 0.085, 0.13, 0.223, 0.22, 0.17, 0.14])
+        sgrad = np.array([0.0, 0.15, 0.3, 0.5, 0.650, 1.0, 2.0, 3.0])
+        sg_p0 = np.array([0.078, 0.080, 0.085, 0.13, 0.223, 0.22, 0.17, 0.14])
         nssig = sgrad.size
         # Fill the mask and add to initial parameters
         splmsk = np.append(splmsk, 4*np.ones(nssig))
@@ -568,7 +556,7 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
     fa = {'spi_rad': [sbrad, sprad, sirad, sgrad], 'spl_msk':splmsk, 'rad': rad, 'fdata': datacut.flatten(), 'err': err, 'obspars': obspars}
 
     # Do a quick check to make sure the model is being interpreted correctly
-    plotinitial = True
+    plotinitial = False
     if plotinitial:
         allwght, model = make_model(p0, obspars, rad, spi_rad=[sbrad, sprad, sirad, sgrad], spl_msk=splmsk, plotit=True)
         dathdu = fits.PrimaryHDU(model.T)
