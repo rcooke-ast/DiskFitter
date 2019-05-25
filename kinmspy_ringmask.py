@@ -243,7 +243,7 @@ def prep_data_model(plotinitial=False, gencube=False):
     obspars['cellsize'] = cellsize  # arcseconds/pixel
     obspars['dv'] = dvelo  # km/s/channel
     obspars['beamsize'] = np.array([bmaj, bmin, bpa])  # (arcsec, arcsec, degrees)
-    obspars['nsamps'] = 5e5  # Number of cloudlets to use for KinMS models
+    obspars['nsamps'] = 1e6  # Number of cloudlets to use for KinMS models
     obspars['rms'] = rmscut  # RMS of data
     obspars['sbprof'] = sb_profile  # Surface brightness profile
     obspars['velocut0'] = velocut[0]
@@ -279,7 +279,7 @@ def prep_data_model(plotinitial=False, gencube=False):
     maxintflux = 10*sumflux  # upper bound total flux
     posang = 150.  # Best fit posang.
     minposang = 90.  # Min posang.
-    maxposang = 180.  # Max posang.
+    maxposang = 230.  # Max posang.
     inc = 10.  # degrees
     mininc = 5.0  # Min inc
     maxinc = 15.0  # Max inc
@@ -413,10 +413,12 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         rings = np.linspace(0.0, 3.0, 20)
 
     # Start with a better guess of the disk parameters
-    param = np.array([432.798918, 150.0, 7.214971093, -0.09105279131, -0.02010872831, 0.1535637512, 0.7791708363, 0.07906237252])
+    param = np.array([22.44355614, 151.5557589, 5.630761085, 0, -0.02, 0.01462441849, 0.8, 0.1441155137])
+    #param = np.array([250.798918, 150.0, 7.214971093, 0.0, -0.02, 0.02, 0.8, 0.4])
     #param = np.array([1.145, 151.189245, 6.969, 0.035626, 0.0344, 0.1513, 0.8, 0.0764])
     steps = np.array([1.0E-3, 1.0E-1, 1.0E-1, 1.0E-4, 1.0E-4, 1.0E-4, 1.0e-3, 1.0E-3, 0.01])
-    p0 = np.append(param, 0.8)  # Add another parameter which represents the gradient of the surface brightness profile
+    #p0 = np.append(param, 0.8)  # Add another parameter which represents the gradient of the surface brightness profile
+    p0 = np.append(param, 0.0)  # Add another parameter which represents the gradient of the surface brightness profile
 
     # Set some constraints you would like to impose
     param_base = {'value': 0., 'fixed': 0, 'limited': [1, 1], 'limits': [0., 0.], 'step': 0.0, 'relstep': 0.01}
@@ -431,6 +433,10 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         else:
             param_info[i]['limits'] = [-100, 100]
         param_info[i]['step'] = steps[i]
+    param_info[3]['fixed'] = 1
+    param_info[4]['fixed'] = 1
+    param_info[6]['fixed'] = 1
+    param_info[8]['fixed'] = 1
 
     # Set the errors
     #err = obspars['rms'].repeat(datacut.shape[2], axis=2).flatten()
@@ -438,11 +444,14 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
 
     outvals = np.zeros((p0.size, rings.size-1))
     outerrs = np.zeros((p0.size, rings.size-1))
-    for rr in range(rings.size-1):
+    for rrt in range(rings.size-1):
+        rr = rings.size - 2 - rrt
+        print(rr+1, rings.size-1)
         # Restart from the previous best parameters
-        if rr != 0:
+        if rr != rings.size - 2:
             for i in range(len(p0)):
                 param_info[i]['value'] = m.params[i]
+                p0[i] = m.params[i]
         # Set the ring properties
         ring = [rings[rr], rings[rr+1]-rings[rr]]
 
@@ -618,11 +627,11 @@ if __name__ == "__main__":
         fitit = False
         if fitit:
             outvals, outerrs = run_chisq(datacut, param, obspars, rad, priorarr)
-            np.save("outvals", outvals)
-            np.save("outerrs", outerrs)
+            np.save("outvals_fixpar", outvals)
+            np.save("outerrs_fixpar", outerrs)
         else:
-            outvals = np.load("outvals.npy")
-            outerrs = np.load("outerrs.npy")
+            outvals = np.load("outvals_fixpar.npy")
+            outerrs = np.load("outerrs_fixpar.npy")
         rings = np.linspace(0.0, 3.0, 20)
         for ii in range(outvals.shape[0]):
             plt.subplot(3, 3, ii+1)
