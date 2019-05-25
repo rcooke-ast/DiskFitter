@@ -19,31 +19,22 @@ from matplotlib import pyplot as plt
 Gcons = 6.67408e-11 * u.m**3 / u.kg / u.s**2
 dist = 59.5 * u.pc
 
-parscale = 1.0 + 0.0*np.array([10.0, 1.0E4, 1.0E4, 1.0E4, 1.0])
+parscale = 1.0 + 0.0*np.array([1.0E4, 1.0E4, 1.0E4, 1.0])
 
 
-def make_model(param, obspars, rad, spi_rad=None, spl_msk=None, plotit=False, rings=None):
+def make_model(param, obspars, rad, spi_rad=None, spl_msk=None, plotit=False, ring=None, ringid=None):
     """rad is in arcseconds
     """
-    if rings is None:
-        rings = np.linspace(0.0, 3.0, 20)
 
     # Scale the kinms params
     ww = np.where(spl_msk == 0)
     param[ww] /= parscale
 
-    intflux, centx, centy, voffset, masscen =\
-        param[0], param[1], param[2], param[3], param[4]
+    centx, centy, voffset, masscen = param[0], param[1], param[2], param[3]
+    sbProf = np.ones_like(rad)
 
-    # Get the surface brightness profile
-    if spi_rad[0] is None:
-        sbProf = obspars['sbprof']
-    else:
-        ww = np.where(spl_msk == 1)
-        sbfunc = interpolate.interp1d(spi_rad[0], param[ww], kind='linear', bounds_error=False, fill_value='extrapolate')
-        sbProf = sbfunc(rad)
-        sbProf *= 1.0/np.max(sbProf)
-        sbProf[sbProf < 0.0] = 0.0
+    ww = np.where((spl_msk == 1) & (ringid == ring[2]))[0]
+    intflux = param[ww]
 
     # Get the position angle profile
     ww = np.where(spl_msk == 2)
@@ -96,20 +87,13 @@ def make_model(param, obspars, rad, spi_rad=None, spl_msk=None, plotit=False, ri
     cent = [xs/2, ys/2]
     xx, yy = np.meshgrid(np.linspace(0.0, xs-cellSize, xSize)-cent[0], np.linspace(0.0, ys-cellSize, ySize)-cent[1], indexing='ij')
     radcen = np.sqrt(xx**2 + yy**2)
-    allwght = np.zeros_like(radcen)
-    for rr in range(rings.size-1):
-        # Set the ring properties
-        ring = [rings[rr], rings[rr+1]-rings[rr]]
-        wght = np.cos(0.5 * np.pi * (radcen - ring[0]) / ring[1]) ** 2
-        wght[(ring[0]-ring[1] > radcen) | (radcen > ring[0]+ring[1])] = 0.0
-        allwght += wght
 
-    if plotit:
-        plt.imshow(allwght)
-        plt.show()
+    # Set the ring properties
+    wght = np.cos(0.5 * np.pi * (radcen - ring[0]) / ring[1]) ** 2
+    wght[(ring[0]-ring[1] > radcen) | (radcen > ring[0]+ring[1])] = 0.0
 
     # This returns the model
-    return allwght, KinMS(obspars['xsize'], obspars['ysize'], obspars['vsize'], obspars['cellsize'], obspars['dv'],
+    return wght, KinMS(obspars['xsize'], obspars['ysize'], obspars['vsize'], obspars['cellsize'], obspars['dv'],
                     obspars['beamsize'], incProf, sbProf=sbProf, sbRad=rad, velRad=rad, velProf=vel,
                     nSamps=obspars['nsamps'], intFlux=intflux, posAng=paProf, gasSigma=gassigma,
                     phaseCen=[centx, centy], vOffset=voffset, fixSeed=True)
@@ -299,7 +283,7 @@ def prep_data_model(plotinitial=False, gencube=False):
     obspars['cellsize'] = cellsize  # arcseconds/pixel
     obspars['dv'] = dvelo  # km/s/channel
     obspars['beamsize'] = np.array([bmaj, bmin, bpa])  # (arcsec, arcsec, degrees)
-    obspars['nsamps'] = 5e6  # Number of cloudlets to use for KinMS models
+    obspars['nsamps'] = 1e6  # Number of cloudlets to use for KinMS models
     obspars['rms'] = rmscut  # RMS of data
     obspars['sbprof'] = sb_profile  # Surface brightness profile
     obspars['velocut0'] = velocut[0]
@@ -336,7 +320,7 @@ def prep_data_model(plotinitial=False, gencube=False):
     centx = 0.0  # Best fit x-pos for kinematic centre
     mincentx = -5.0  # min cent x
     maxcentx = 5.0  # max cent x
-    centy = 0.0  # Best fit y-pos for kinematic centre
+    centy = -0.02  # Best fit y-pos for kinematic centre
     mincenty = -5.0  # min cent y
     maxcenty = 5.0  # max cent y
     voffset = 0.0  # Best fit velocity centroid
@@ -347,12 +331,12 @@ def prep_data_model(plotinitial=False, gencube=False):
     max_masscen = 1.0  # Upper range masscen
 
     # starting best guess #
-    param = np.array([intflux, centx, centy, voffset, masscen])
+    param = np.array([centx, centy, voffset, masscen])
 
     # Setup array for priors - in this code all priors are uniform #
     priorarr = np.zeros((param.size, 2))
-    priorarr[:, 0] = [minintflux, mincentx, mincenty, minvoffset, min_masscen]  # Minimum
-    priorarr[:, 1] = [maxintflux, maxcentx, maxcenty, maxvoffset, max_masscen]  # Maximum
+    priorarr[:, 0] = [mincentx, mincenty, minvoffset, min_masscen]  # Minimum
+    priorarr[:, 1] = [maxcentx, maxcenty, maxvoffset, max_masscen]  # Maximum
 
     # if gencube:
     #     fsim = make_model(param, obspars, rad)
@@ -432,21 +416,40 @@ def run_mcmc(datacut, param, obspars, rad, priorarr):
     np.save("chains.npy", sampler.chain)
 
 
-def myfunct(p, fjac=None, rad=None, fdata=None, err=None, obspars=None, spi_rad=None, spl_msk=None):
+def model_wrapper(p, obspars, fdata, rings, spi_rad, spl_msk, ringid, flat=True, ddpid=-2):
+    data = np.zeros_like(fdata)
+    outmodel = np.zeros_like(fdata)
+    for rr in range(rings.size-1):
+        #print(rr, ddpid, ringid[ddpid])
+        if ddpid != -2 and rr != ringid[ddpid]:
+            continue
+        ring = [rings[rr], rings[rr + 1] - rings[rr], rr]
+        allwght, model = make_model(p, obspars, rad, spi_rad=spi_rad, spl_msk=spl_msk, ring=ring, ringid=ringid)
+        if flat:
+            allwght = allwght[:, :, np.newaxis].repeat(model.shape[2], axis=2).flatten()
+            outmodel += model.flatten() * allwght
+        else:
+            allwght = allwght[:, :, np.newaxis].repeat(model.shape[2], axis=2)
+            if rr == 0:
+                outmodel = model * allwght
+            else:
+                outmodel += model * allwght
+            allwght = allwght.flatten()
+        data += fdata*allwght
+    if flat:
+        return data, outmodel
+    else:
+        return outmodel
+
+
+def myfunct(p, fjac=None, rad=None, fdata=None, ddpid=-2, err=None, obspars=None, spi_rad=None, spl_msk=None, rings=None, ringid=None):
     # Run make_model to produce a model cube
-    allwght, model = make_model(p, obspars, rad, spi_rad=spi_rad, spl_msk=spl_msk)
-
-    allwght = allwght[:, :, np.newaxis].repeat(model.shape[2], axis=2).flatten()
-
-    chisq_model = model.flatten() * allwght + fdata * (1.0 - allwght)
-
-    #print(np.sum(((fdata-chisq_model)/err)**2), p)
+    data, chisq_model = model_wrapper(p, obspars, fdata, rings, spi_rad, spl_msk, ringid, ddpid=ddpid)
 
     # Non-negative status value means MPFIT should
     # continue, negative means stop the calculation.
     status = 0
-    print("Number of effective pixels =", np.sum(allwght))
-    return [status, (fdata-chisq_model)/err]
+    return [status, (data-chisq_model)/err]
 
 
 def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
@@ -454,34 +457,28 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         rings = np.linspace(0.0, 3.0, 20)
 
     # Start with a better guess of the disk parameters
-    param = np.array([28.0, -0.01216, -0.02932, 0.07400, 0.8])
-    steps = np.array([1.0E-4, 1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4])*parscale
+    param = np.array([0.0, -0.02, 0.015, 0.8])
+    steps = np.array([1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4])*parscale
     p0 = param * parscale
+    ringid = -1*np.ones(p0.size)
 
     spldict = dict(sb=True, inc=True, posang=True, gassig=True)
     splmsk = np.zeros(param.size)
-    outvals = np.load("outvals.npy")
+    outvals = np.load("outvals_fixpar.npy")
 
     #######################################
     #          PREPARE THE FIT
     #######################################
     if spldict['sb']:
         # Include the radial surface brightness profile as a free parameter
-        sbrad = rings[1:-1]
-        sbrad = np.append([0.0, sbrad[0]/2.], sbrad)
-        sb_p0 = np.append(outvals[0, 0]/2, outvals[0, :])
-        # sbrad = np.array(
-        #     [0.0, 0.15789474, 0.31578947, 0.47368421, 0.63157895, 0.78947368, 0.94736842, 1.10526316, 1.26315789,
-        #      1.57894737, 1.89473684, 2.21052632, 2.52631579, 2.84210526])
-        # sb_p0 = np.array(
-        #     [454.12234286, 393.36149741, 286.80762835, 216.90814331, 207.93973294, 161.50987764, 140.72118948,
-        #      117.95176048, 98.90525955, 68.81306633, 48.03526046, 32.32684097, 21.07468516, 14.83180197])
+        sbrad = rings[:-1]
+        sb_p0 = outvals[1, :]
         nsurfb = sbrad.size
-        sb_p0 *= 1.0/np.max(sb_p0)
         # Fill the mask and add to initial parameters
         splmsk = np.append(splmsk, 1*np.ones(nsurfb))
         p0 = np.append(p0, sb_p0)
-        priorarr = np.append(priorarr, np.repeat([[0.0, 1.0]], nsurfb, axis=0), axis=0)
+        ringid = np.append(ringid, np.arange(nsurfb))
+        priorarr = np.append(priorarr, np.repeat([[0.0, 1000.0]], nsurfb, axis=0), axis=0)
         #steps = np.append(steps, np.zeros(nsurfb))
         steps = np.append(steps, np.zeros(nsurfb))
     else:
@@ -497,6 +494,7 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         # Fill the mask and add to initial parameters
         splmsk = np.append(splmsk, 2*np.ones(nspos))
         p0 = np.append(p0, sp_p0)
+        ringid = np.append(ringid, np.arange(nspos))
         priorarr = np.append(priorarr, np.repeat([[90.0, 250.0]], nspos, axis=0), axis=0)
         #steps = np.append(steps, 0.1*np.ones(nspos))
         steps = np.append(steps, np.zeros(nspos))
@@ -517,13 +515,14 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         # Fill the mask and add to initial parameters
         splmsk = np.append(splmsk, 3*np.ones(nsinc))
         p0 = np.append(p0, si_p0)
-        priorarr = np.append(priorarr, np.repeat([[5.0, 15.0]], nsinc, axis=0), axis=0)
+        ringid = np.append(ringid, np.arange(nsinc))
+        priorarr = np.append(priorarr, np.repeat([[4.0, 10.0]], nsinc, axis=0), axis=0)
         #steps = np.append(steps, 0.01*np.ones(nsinc))
         steps = np.append(steps, np.zeros(nsinc))
     else:
         splmsk = np.append(splmsk, 3)
         p0 = np.append(p0, 10.0)
-        priorarr = np.append(priorarr, np.repeat([[5.0, 15.0]], 1, axis=0), axis=0)
+        priorarr = np.append(priorarr, np.repeat([[4.0, 10.0]], 1, axis=0), axis=0)
         steps = np.append(steps, 0.01)
         sirad = None
 
@@ -537,13 +536,14 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         # Fill the mask and add to initial parameters
         splmsk = np.append(splmsk, 4*np.ones(nssig))
         p0 = np.append(p0, sg_p0)
-        priorarr = np.append(priorarr, np.repeat([[0.05, 0.3]], nssig, axis=0), axis=0)
+        ringid = np.append(ringid, np.arange(nssig))
+        priorarr = np.append(priorarr, np.repeat([[0.05, 0.4]], nssig, axis=0), axis=0)
         #steps = np.append(steps, 0.1*sg_p0)
         steps = np.append(steps, np.zeros(nssig))
     else:
         splmsk = np.append(splmsk, 4)
         p0 = np.append(p0, 0.2)
-        priorarr = np.append(priorarr, np.repeat([[0.05, 0.3]], 1, axis=0), axis=0)
+        priorarr = np.append(priorarr, np.repeat([[0.05, 0.4]], 1, axis=0), axis=0)
         steps = np.append(steps, 0.01)
         sgrad = None
 
@@ -565,12 +565,12 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
     # Now tell the fitting program what we called our variables
     #err = obspars['rms'].repeat(datacut.shape[2], axis=2).flatten()
     err = np.mean(obspars['rms'])#.flatten()
-    fa = {'spi_rad': [sbrad, sprad, sirad, sgrad], 'spl_msk':splmsk, 'rad': rad, 'fdata': datacut.flatten(), 'err': err, 'obspars': obspars}
+    fa = {'rings': rings, 'ringid':ringid, 'spi_rad': [sbrad, sprad, sirad, sgrad], 'spl_msk':splmsk, 'rad': rad, 'fdata': datacut.flatten(), 'err': err, 'obspars': obspars}
 
     # Do a quick check to make sure the model is being interpreted correctly
-    plotinitial = True
+    plotinitial = False
     if plotinitial:
-        allwght, model = make_model(p0, obspars, rad, spi_rad=[sbrad, sprad, sirad, sgrad], spl_msk=splmsk, plotit=True)
+        model = model_wrapper(p0, obspars, datacut.flatten(), rings, [sbrad, sprad, sirad, sgrad], splmsk, ringid, flat=False)
         dathdu = fits.PrimaryHDU(model.T)
         dathdu.writeto("test.fits", overwrite=True)
         print("check test.fits, then continue when satisfied with the initial guess...")
@@ -580,12 +580,12 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
     #  PERFORM THE FIT AND PRINT RESULTS
     #######################################
 
-    m = mpfit.mpfit(myfunct, p0, parinfo=param_info, functkw=fa, quiet=False, ncpus=4)
+    m = mpfit.mpfit(myfunct, p0, parinfo=param_info, functkw=fa, quiet=False, ncpus=8)
     if m.status <= 0:
         print('error message = ', m.errmsg)
     print("param: ", m.params)
     print("error: ", m.perror)
-    wght, fsim = make_model(m.params, obspars, rad, spi_rad=[sbrad, sprad, sirad, sgrad], spl_msk=splmsk, plotit=True)
+    fsim = model_wrapper(m.params, obspars, datacut.flatten(), rings, [sbrad, sprad, sirad, sgrad], splmsk, ringid, flat=False)
     dathdu = fits.PrimaryHDU(fsim.T)
     dathdu.writeto("test.fits", overwrite=True)
     dathdu = fits.PrimaryHDU(datacut.T)
