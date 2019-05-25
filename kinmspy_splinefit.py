@@ -594,6 +594,8 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
     dathdu.writeto("test_diff.fits", overwrite=True)
     dathdu = fits.PrimaryHDU(((fsim - datacut) / err).T)
     dathdu.writeto("test_resid.fits", overwrite=True)
+    np.save("outvals_spline", m.params)
+    np.save("outerrs_spline", m.perror)
     if False:
         plt.subplot(211)
         plt.plot(rad, sbProf, 'k-')
