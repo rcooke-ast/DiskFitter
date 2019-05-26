@@ -48,10 +48,11 @@ def make_model(param, obspars, rad, ring):
     cent = [xs/2, ys/2]
     xx, yy = np.meshgrid(np.linspace(0.0, xs-cellSize, xSize)-cent[0], np.linspace(0.0, ys-cellSize, ySize)-cent[1], indexing='ij')
     radcen = np.sqrt(xx**2 + yy**2)
-    wght = np.cos(0.5 * np.pi * (radcen - ring[0]) / ring[1]) ** 2
+    #wght = np.cos(0.5 * np.pi * (radcen - ring[0]) / ring[1]) ** 2
+    wght = 1 - np.abs(radcen - ring[0])/ring[1]
     wght[(ring[0]-ring[1] > radcen) | (radcen > ring[0]+ring[1])] = 0.0
-    #plt.imshow(wght)
-    #plt.show()
+    plt.imshow(wght)
+    plt.show()
     # This returns the model
     return wght, KinMS(obspars['xsize'], obspars['ysize'], obspars['vsize'], obspars['cellsize'], obspars['dv'],
                  obspars['beamsize'], inc, sbProf=sbProf, sbRad=rad, velRad=rad, velProf=vel,
@@ -395,7 +396,7 @@ def run_mcmc(datacut, param, obspars, rad, priorarr):
     np.save("chains.npy", sampler.chain)
 
 
-def myfunct_ring(p, fjac=None, rad=None, fdata=None, err=None, obspars=None, ring=None):
+def myfunct_ring(p, fjac=None, rad=None, fdata=None, err=None, obspars=None, ddpid=None, ring=None):
     # Run make_model to produce a model cube
     wght, model = make_model(p, obspars, rad, ring)
     wght = wght[:, :, np.newaxis].repeat(model.shape[2], axis=2).flatten()
@@ -444,6 +445,8 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
 
     outvals = np.zeros((p0.size, rings.size-1))
     outerrs = np.zeros((p0.size, rings.size-1))
+    # gen_wght = True
+    # allwght = np.zeros((datacut.shape[0], datacut.shape[1]))
     for rrt in range(rings.size-1):
         rr = rings.size - 2 - rrt
         print(rr+1, rings.size-1)
@@ -454,6 +457,23 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
                 p0[i] = m.params[i]
         # Set the ring properties
         ring = [rings[rr], rings[rr+1]-rings[rr]]
+
+        # if gen_wght:
+        #     cellSize = obspars['cellsize']
+        #     xs, ys = obspars['xsize'], obspars['ysize']
+        #     xSize = float(round(xs / cellSize))
+        #     ySize = float(round(ys / cellSize))
+        #     cent = [xs / 2, ys / 2]
+        #     xx, yy = np.meshgrid(np.linspace(0.0, xs - cellSize, xSize) - cent[0],
+        #                          np.linspace(0.0, ys - cellSize, ySize) - cent[1], indexing='ij')
+        #     radcen = np.sqrt(xx ** 2 + yy ** 2)
+        #     # wght = np.cos(0.5 * np.pi * (radcen - ring[0]) / ring[1]) ** 2
+        #     wght = 1 - np.abs(radcen - ring[0]) / ring[1]
+        #     wght[(ring[0] - ring[1] > radcen) | (radcen > ring[0] + ring[1])] = 0.0
+        #     allwght += wght
+        #     plt.imshow(wght)
+        #     plt.show()
+        #     continue
 
         # Now tell the fitting program what we called our variables
         fa = {'rad': rad, 'fdata': datacut.flatten(), 'err': err, 'obspars': obspars, 'ring': ring}
@@ -467,6 +487,8 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
             print('error message = ', m.errmsg)
         outvals[:, rr] = m.params.copy()
         outerrs[:, rr] = m.perror.copy()
+    # plt.imshow(allwght)
+    # plt.show()
     return outvals, outerrs
 
 
@@ -573,7 +595,7 @@ def run_chisq_spi_fixed(datacut, param, obspars, rad, priorarr):
     fa = {'spi_rad': [sbrad, sprad, sirad, sgrad], 'spl_msk':splmsk, 'rad': rad, 'fdata': datacut.flatten(), 'err': err, 'obspars': obspars}
 
     # Do a quick check to make sure the model is being interpreted correctly
-    plotinitial = False
+    plotinitial = True
     if plotinitial:
         model = make_model(p0, obspars, rad, spi_rad=[sbrad, sprad, sirad, sgrad], spl_msk=splmsk, plotit=True)
         dathdu = fits.PrimaryHDU(model.T)
@@ -624,14 +646,14 @@ if __name__ == "__main__":
         run_mcmc(datacut, param, obspars, rad, priorarr)
     if chisq:
         print("Running chi-squared minimization")
-        fitit = False
+        fitit = True
         if fitit:
             outvals, outerrs = run_chisq(datacut, param, obspars, rad, priorarr)
-            np.save("outvals_fixpar", outvals)
-            np.save("outerrs_fixpar", outerrs)
+            np.save("outvals_fixpar_triangle", outvals)
+            np.save("outerrs_fixpar_triangle", outerrs)
         else:
-            outvals = np.load("outvals_fixpar.npy")
-            outerrs = np.load("outerrs_fixpar.npy")
+            outvals = np.load("outvals_fixpar_triangle.npy")
+            outerrs = np.load("outerrs_fixpar_triangle.npy")
         rings = np.linspace(0.0, 3.0, 20)
         for ii in range(outvals.shape[0]):
             plt.subplot(3, 3, ii+1)
