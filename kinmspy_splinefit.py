@@ -89,7 +89,10 @@ def make_model(param, obspars, rad, spi_rad=None, spl_msk=None, plotit=False, ri
     radcen = np.sqrt(xx**2 + yy**2)
 
     # Set the ring properties
-    wght = np.cos(0.5 * np.pi * (radcen - ring[0]) / ring[1]) ** 2
+
+    # wght = np.cos(0.5 * np.pi * (radcen - ring[0]) / ring[1]) ** 2
+    # wght[(ring[0]-ring[1] > radcen) | (radcen > ring[0]+ring[1])] = 0.0
+    wght = 1 - np.abs(radcen - ring[0])/ring[1]
     wght[(ring[0]-ring[1] > radcen) | (radcen > ring[0]+ring[1])] = 0.0
 
     # This returns the model
@@ -97,48 +100,6 @@ def make_model(param, obspars, rad, spi_rad=None, spl_msk=None, plotit=False, ri
                     obspars['beamsize'], incProf, sbProf=sbProf, sbRad=rad, velRad=rad, velProf=vel,
                     nSamps=obspars['nsamps'], intFlux=intflux, posAng=paProf, gasSigma=gassigma,
                     phaseCen=[centx, centy], vOffset=voffset, fixSeed=True)
-
-
-def lnlike(param, obspars, rad, fdata):
-    # This function calculates the log-likelihood, comparing model and data
-
-    # Run make_model to produce a model cube
-    _, modout = make_model(param, obspars, rad)
-
-    # calculate the chi^2
-    chiconv = (((fdata - modout) ** 2) / ((obspars['rms']) ** 2)).sum()
-
-    # covert to log-likelihood
-    like = -0.5 * (chiconv - fdata.size)
-    return like
-
-
-def priors(param, priorarr):
-    # This function checks if any guess is out of range of our priors.
-
-    # initally assume all guesses in range 
-    outofrange = 0
-
-    # Loop over each parameter
-    for ii in range(0, priorarr[:, 0].size):
-        # If the parameter is out of range of the prior then add one to out of range, otherwise add zero
-        outofrange += 1 - (priorarr[ii, 0] <= param[ii] <= priorarr[ii, 1])
-
-    if outofrange:
-        # If outofrange NE zero at the end of the loop then at least oen parameter is bad, return -inf.
-        return -np.inf
-    else:
-        # Otherwise return zero
-        return 0.0
-
-
-def lnprob(param, obspars, rad, fdata, priorarr):
-    # This function calls the others above, first checking that params are valid,
-    # and if so returning the log-likelihood.
-    checkprior = priors(param, priorarr)
-    if not np.isfinite(checkprior):
-        return -np.inf
-    return lnlike(param, obspars, rad, fdata)
 
 
 def load_file(year=2011):
@@ -283,7 +244,7 @@ def prep_data_model(plotinitial=False, gencube=False):
     obspars['cellsize'] = cellsize  # arcseconds/pixel
     obspars['dv'] = dvelo  # km/s/channel
     obspars['beamsize'] = np.array([bmaj, bmin, bpa])  # (arcsec, arcsec, degrees)
-    obspars['nsamps'] = 1e6  # Number of cloudlets to use for KinMS models
+    obspars['nsamps'] = 5e6  # Number of cloudlets to use for KinMS models
     obspars['rms'] = rmscut  # RMS of data
     obspars['sbprof'] = sb_profile  # Surface brightness profile
     obspars['velocut0'] = velocut[0]
@@ -356,69 +317,10 @@ def prep_data_model(plotinitial=False, gencube=False):
     return datacut, param, obspars, rad, priorarr
 
 
-def run_mcmc(datacut, param, obspars, rad, priorarr):
-    # Setup MCMC #
-    ndim = param.size  # How many parameters to fit
-    nwalkers = 200  # Minimum of 2 walkers per free parameter
-    mcmc_steps = 20000  # How many sample you want to take of the PDF. 3000 is reasonable for a test, larger the better for actual parameter estimation.
-    nsteps = mcmc_steps / nwalkers  # Each walker must take this many steps to give a total of mcmc_steps steps
-
-    # How many CPUs to use. Here I am allowing half of the CPUs. Change this if you want more/less.
-    cpus2use = 6#multiprocessing.cpu_count() // 2
-
-    # Do a test to estimate how long it will take to run the whole code
-    print("Estimating the expected execution time")
-    t0 = time.time()
-    for i in range(0, 10): _, fsim = make_model(param, obspars, rad)
-    t1 = time.time()
-    print("One model takes", ((t1 - t0) / 10.), "seconds")
-    print("Total runtime expected with", cpus2use, "processors:", (((t1 - t0) / 10.) * mcmc_steps) / (0.6 * cpus2use))
-
-    # Code to run the MCMC
-    t0 = time.time()
-
-    tightball = False
-    if tightball:
-        # walkers start in tight ball around initial guess
-        pos = [param + 1e-4 * np.random.randn(ndim) for i in range(nwalkers)]
-    else:
-        # walkers sample prior space
-        pos = [np.random.uniform(priorarr[:, 0], priorarr[:, 1]) for i in range(nwalkers)]
-
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(obspars, rad, datacut, priorarr),
-                                    threads=cpus2use)  # Setup the sampler
-
-    # Create a new output file, with the next free number #
-    num = 0
-    chainstart = "KinMS_MCMCrun"
-    chainname = chainstart + str(num) + ".dat"
-    while os.path.isfile(chainname):
-        num += 1
-        chainname = chainstart + str(num) + ".dat"
-    f = open(chainname, "w")
-    f.close()
-
-    # Run the samples, while outputing a progress bar to the screen, and writing progress to the file.
-    width = 30
-    for i, result in enumerate(sampler.sample(pos, iterations=nsteps)):
-        position = result[0]
-        n = int((width + 1) * float(i) / nsteps)
-        sys.stdout.write("\r[{0}{1}]".format('#' * n, ' ' * (width - n)))
-        f = open(chainname, "a")
-        for k in range(position.shape[0]):
-            f.write("{0:4d} {1:s}\n".format(k, " ".join(map(str, position[k]))))
-        f.close()
-    sys.stdout.write("\n")
-    t1 = time.time()
-    print("It took", t1 - t0, "seconds")
-
-    print("Saving samples")
-    np.save("chains.npy", sampler.chain)
-
-
 def model_wrapper(p, obspars, fdata, rings, spi_rad, spl_msk, ringid, flat=True, ddpid=-2):
     data = np.zeros_like(fdata)
     outmodel = np.zeros_like(fdata)
+    outwght = np.zeros_like(fdata)
     for rr in range(rings.size-1):
         #print(rr, ddpid, ringid[ddpid])
         if ddpid != -2 and rr != ringid[ddpid]:
@@ -432,14 +334,16 @@ def model_wrapper(p, obspars, fdata, rings, spi_rad, spl_msk, ringid, flat=True,
             allwght = allwght[:, :, np.newaxis].repeat(model.shape[2], axis=2)
             if rr == 0:
                 outmodel = model * allwght
+                outwght = allwght
             else:
                 outmodel += model * allwght
+                outwght += allwght
             allwght = allwght.flatten()
         data += fdata*allwght
     if flat:
         return data, outmodel
     else:
-        return outmodel
+        return outmodel, outwght
 
 
 def myfunct(p, fjac=None, rad=None, fdata=None, ddpid=-2, err=None, obspars=None, spi_rad=None, spl_msk=None, rings=None, ringid=None):
@@ -457,14 +361,16 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         rings = np.linspace(0.0, 3.0, 20)
 
     # Start with a better guess of the disk parameters
-    param = np.array([0.0, -0.02, 0.015, 0.8])
-    steps = np.array([1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4])*parscale
+    param = np.array([0.01, -0.01, 0.015, 0.8])
+    steps = 0.0*np.array([1.0E-5, 1.0E-5, 1.0E-5, 1.0e-4])*parscale
+    fixed, nfree = np.zeros(param.size, dtype=np.int), 2
     p0 = param * parscale
     ringid = -1*np.ones(p0.size)
 
     spldict = dict(sb=True, inc=True, posang=True, gassig=True)
     splmsk = np.zeros(param.size)
-    outvals = np.load("outvals_fixpar.npy")
+    #outvals = np.load("outvals_fixpar.npy")
+    outvals = np.load("outvals_fixpar_triangle.npy")
 
     #######################################
     #          PREPARE THE FIT
@@ -472,7 +378,8 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
     if spldict['sb']:
         # Include the radial surface brightness profile as a free parameter
         sbrad = rings[:-1]
-        sb_p0 = outvals[1, :]
+        sb_p0 = 80.0 + 0.0*outvals[0, :]
+        sb_p0 = outvals[0, :]
         nsurfb = sbrad.size
         # Fill the mask and add to initial parameters
         splmsk = np.append(splmsk, 1*np.ones(nsurfb))
@@ -480,13 +387,17 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         ringid = np.append(ringid, np.arange(nsurfb))
         priorarr = np.append(priorarr, np.repeat([[0.0, 1000.0]], nsurfb, axis=0), axis=0)
         #steps = np.append(steps, np.zeros(nsurfb))
-        steps = np.append(steps, np.zeros(nsurfb))
+        steps = np.append(steps, 1.0E-4*np.zeros(nsurfb))
+        fixarr = np.zeros(nsurfb, dtype=np.int)
+        fixarr[nfree:] = 1
+        fixed = np.append(fixed, fixarr)
     else:
         sbrad = None
 
     if spldict['posang']:
         # Include the radial position angle profile as a free parameter
         sprad = rings[:-1]
+        sp_p0 = 150.0 + 0.0*outvals[1, :]
         sp_p0 = outvals[1, :]
         # sprad = np.array([0.0, 0.15, 0.3, 0.5, 0.8, 1.15, 1.6, 2.0, 3.0])
         # sp_p0 = np.array([172, 160.0, 154.8, 155.4, 152.7, 153.3, 152.5, 152.2, 151.5])
@@ -498,6 +409,9 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         priorarr = np.append(priorarr, np.repeat([[90.0, 250.0]], nspos, axis=0), axis=0)
         #steps = np.append(steps, 0.1*np.ones(nspos))
         steps = np.append(steps, np.zeros(nspos))
+        fixarr = np.zeros(nspos, dtype=np.int)
+        fixarr[nfree:] = 1
+        fixed = np.append(fixed, fixarr)
     else:
         p0 = np.append(p0, 150.0)
         splmsk = np.append(splmsk, 2)
@@ -508,9 +422,8 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
     if spldict['inc']:
         # Include the inclination profile as a free parameter
         sirad = rings[:-1]
+        si_p0 = 6.0 + 0.0 * outvals[2, :]
         si_p0 = outvals[2, :]
-        # sirad = np.array([0.0, 0.25, 0.50, 1.0, 2.0, 3.0])
-        # si_p0 = np.array([7.35403098, 7.63412163, 7.70179149, 7.35666027, 5.84205372, 5.11887352])
         nsinc = sirad.size
         # Fill the mask and add to initial parameters
         splmsk = np.append(splmsk, 3*np.ones(nsinc))
@@ -519,6 +432,9 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         priorarr = np.append(priorarr, np.repeat([[4.0, 10.0]], nsinc, axis=0), axis=0)
         #steps = np.append(steps, 0.01*np.ones(nsinc))
         steps = np.append(steps, np.zeros(nsinc))
+        fixarr = np.zeros(nsinc, dtype=np.int)
+        fixarr[nfree:] = 1
+        fixed = np.append(fixed, fixarr)
     else:
         splmsk = np.append(splmsk, 3)
         p0 = np.append(p0, 10.0)
@@ -529,9 +445,8 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
     if spldict['gassig']:
         # Include the inclination profile as a free parameter
         sgrad = rings[:-1]
+        sg_p0 = 0.3 + 0.0*outvals[7, :]
         sg_p0 = outvals[7, :]
-        # sgrad = np.array([0.0, 0.15, 0.3, 0.5, 0.650, 1.0, 2.0, 3.0])
-        # sg_p0 = np.array([0.078, 0.080, 0.085, 0.13, 0.223, 0.22, 0.17, 0.14])
         nssig = sgrad.size
         # Fill the mask and add to initial parameters
         splmsk = np.append(splmsk, 4*np.ones(nssig))
@@ -540,6 +455,9 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         priorarr = np.append(priorarr, np.repeat([[0.05, 0.4]], nssig, axis=0), axis=0)
         #steps = np.append(steps, 0.1*sg_p0)
         steps = np.append(steps, np.zeros(nssig))
+        fixarr = np.zeros(nssig, dtype=np.int)
+        fixarr[nfree:] = 1
+        fixed = np.append(fixed, fixarr)
     else:
         splmsk = np.append(splmsk, 4)
         p0 = np.append(p0, 0.2)
@@ -548,7 +466,7 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         sgrad = None
 
     # Set some constraints you would like to impose
-    param_base = {'value': 0., 'fixed': 0, 'limited': [1, 1], 'limits': [0., 0.], 'step': 0.0, 'relstep': 0.001}
+    param_base = {'value': 0., 'fixed': 0, 'limited': [1, 1], 'limits': [0., 0.], 'step': 0.0, 'relstep': 0.1}
 
     # Make a copy of this 'base' for all of our parameters, and set starting parameters
     param_info = []
@@ -561,6 +479,7 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         else:
             param_info[i]['limits'] = [priorarr[i, 0], priorarr[i, 1]]
             param_info[i]['step'] = steps[i]
+        param_info[i]['fixed'] = fixed[i]
 
     # Now tell the fitting program what we called our variables
     #err = obspars['rms'].repeat(datacut.shape[2], axis=2).flatten()
@@ -570,11 +489,13 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
     # Do a quick check to make sure the model is being interpreted correctly
     plotinitial = False
     if plotinitial:
-        model = model_wrapper(p0, obspars, datacut.flatten(), rings, [sbrad, sprad, sirad, sgrad], splmsk, ringid, flat=False)
+        model, wght = model_wrapper(p0, obspars, datacut.flatten(), rings, [sbrad, sprad, sirad, sgrad], splmsk, ringid, flat=False)
         dathdu = fits.PrimaryHDU(model.T)
         dathdu.writeto("test.fits", overwrite=True)
         print("check test.fits, then continue when satisfied with the initial guess...")
         pdb.set_trace()
+        dathdu = fits.PrimaryHDU(wght.T)
+        dathdu.writeto("test.fits", overwrite=True)
 
     #######################################
     #  PERFORM THE FIT AND PRINT RESULTS
@@ -585,7 +506,7 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         print('error message = ', m.errmsg)
     print("param: ", m.params)
     print("error: ", m.perror)
-    fsim = model_wrapper(m.params, obspars, datacut.flatten(), rings, [sbrad, sprad, sirad, sgrad], splmsk, ringid, flat=False)
+    fsim, wght = model_wrapper(m.params, obspars, datacut.flatten(), rings, [sbrad, sprad, sirad, sgrad], splmsk, ringid, flat=False)
     dathdu = fits.PrimaryHDU(fsim.T)
     dathdu.writeto("test.fits", overwrite=True)
     dathdu = fits.PrimaryHDU(datacut.T)

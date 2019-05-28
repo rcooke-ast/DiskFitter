@@ -51,8 +51,8 @@ def make_model(param, obspars, rad, ring):
     #wght = np.cos(0.5 * np.pi * (radcen - ring[0]) / ring[1]) ** 2
     wght = 1 - np.abs(radcen - ring[0])/ring[1]
     wght[(ring[0]-ring[1] > radcen) | (radcen > ring[0]+ring[1])] = 0.0
-    plt.imshow(wght)
-    plt.show()
+    # plt.imshow(wght)
+    # plt.show()
     # This returns the model
     return wght, KinMS(obspars['xsize'], obspars['ysize'], obspars['vsize'], obspars['cellsize'], obspars['dv'],
                  obspars['beamsize'], inc, sbProf=sbProf, sbRad=rad, velRad=rad, velProf=vel,
@@ -244,7 +244,7 @@ def prep_data_model(plotinitial=False, gencube=False):
     obspars['cellsize'] = cellsize  # arcseconds/pixel
     obspars['dv'] = dvelo  # km/s/channel
     obspars['beamsize'] = np.array([bmaj, bmin, bpa])  # (arcsec, arcsec, degrees)
-    obspars['nsamps'] = 1e6  # Number of cloudlets to use for KinMS models
+    obspars['nsamps'] = 5e6  # Number of cloudlets to use for KinMS models
     obspars['rms'] = rmscut  # RMS of data
     obspars['sbprof'] = sb_profile  # Surface brightness profile
     obspars['velocut0'] = velocut[0]
@@ -482,7 +482,7 @@ def run_chisq(datacut, param, obspars, rad, priorarr, rings=None):
         #  PERFORM THE FIT AND PRINT RESULTS
         #######################################
 
-        m = mpfit.mpfit(myfunct_ring, p0, parinfo=param_info, functkw=fa, quiet=False, ncpus=1)
+        m = mpfit.mpfit(myfunct_ring, p0, parinfo=param_info, functkw=fa, quiet=False, ncpus=5)
         if m.status <= 0:
             print('error message = ', m.errmsg)
         outvals[:, rr] = m.params.copy()
